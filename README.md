@@ -1,5 +1,7 @@
 # Setting up a home energy monitoring system
 
+![dashboard](illustrations/Grafana-solar-dashboard.png)
+
 This repository documents the setup of a home energy monitoring system running
 on a Raspberry Pi. The setup assumes that the energy data is collected via a
 specific device (Smappee) that is wired into the home fusebox. It measures both

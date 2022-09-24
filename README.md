@@ -52,8 +52,8 @@ akkapi@node-1 $ sudo tail -f /var/log/cloud-init-*.log
 When cloud-init finishes the initial installation, all required software should be
 installed and configured!
 
-To finish things of, fire up a web browser and point it to your Pi's IP address and port 3000. (for example, if your Pi get IP address `192.168.68.200`, point your browser to 
-`192.168.68.200:3000`.
+To finish things of, fire up a web browser and point it to your Pi's IP address and port 3000 (for example, if your Pi get IP address `192.168.68.200`, point your browser to 
+`192.168.68.200:3000`).
 
 You should see a Grafana login page which will prompt you to set an initial password
 for the `admin` account.
@@ -61,4 +61,5 @@ for the `admin` account.
 Once logged in, you should perform a small number of configuration steps:
 
 - Set the InfluxDB datasources at `192.168.68.200:3000/datasources/new`
-- Import the Raspberry Pi Grafana dashboard 
+- Import the Raspberry Pi Grafana dashboard
+- Create dashboards for the aggregated energy stats

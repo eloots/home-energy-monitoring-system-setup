@@ -1,0 +1,20 @@
+# This is the meta-data configuration file for cloud-init. Typically this just
+# contains the instance_id. Please refer to the cloud-init documentation for
+# more information:
+#
+# https://cloudinit.readthedocs.io/
+
+instance_id: cloud-image
+influx_db1: rpi_monitoring
+influx_db2: smappee_monitoring
+influx_db3: smappee_monitoring_2
+influx_db4: zigbee_mqtt
+influx_user: xxxx
+influx_passwd: xxxx
+influxdb_server_node: 192.168.68.203
+influxdb_server_port: 8086
+mqtt_broker_node: 192.168.68.203
+mqtt_broker_port: 1883
+smappee_solar_id: f960f45d-c43b-4937-a8d0-ce1869206011
+smappee_genius_id: 5aaf6e89-89cb-4e33-bf34-05abc62f5563
+

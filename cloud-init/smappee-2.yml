@@ -2274,6 +2274,8 @@ runcmd:
     sudo -u akkapi influx <<ENDCFGINFLUX
     create database {{ ds.meta_data.influx_db1 }};
     create database {{ ds.meta_data.influx_db2 }};
+    create database {{ ds.meta_data.influx_db3 }};
+    create database {{ ds.meta_data.influx_db4 }};
     create user {{ ds.meta_data.influx_user }} with password '{{ ds.meta_data.influx_passwd }}' with all privileges;
     ENDCFGINFLUX
 

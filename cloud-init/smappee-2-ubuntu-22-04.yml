@@ -1,0 +1,1509 @@
+#cloud-config
+# vim: syntax=yaml
+#
+
+timezone: Europe/Brussels
+
+# Set your hostname here, the manage_etc_hosts will update the hosts file entries as well
+hostname: static
+manage_etc_hosts: false
+# don't write debian.org into apt mirrors
+apt_preserve_sources_list: true
+# Enable password authentication with the SSH daemon
+ssh_pwauth: true
+
+packages:
+
+# You could modify this for your own user information
+users:
+  - name: pirate
+    gecos: "Hypriot Pirate"
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/zsh
+    groups: users,docker,video
+    plain_text_passwd: hypriot
+    lock_passwd: false
+    ssh_pwauth: true
+    chpasswd: { expire: false }
+  - name: akkapi
+    gecos: "Akka Cluster Pi User"
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/zsh
+    groups: users,docker,video
+    ssh-import-id: None
+    plain_text_passwd: akkapi
+    ssh-authorized-keys: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDkrgM1almJcqu6FaKDrscUVghlJOO6m7wayVnmH0bQEv4uQQ9SZmkCegrGJ63iMI8X0xUShkwYLippePpj0RiucL1e9/FtzqSdu6IHaPFJg7w5G6cEV2c1mvyJRHpi86+Yt3t4z67aSw77uAWkNFKShtSEbePfF5WX/LGknxRND6f3db+SmmOSy5w5qgC4GmG31gnJX6j7s0xWRiMicyYdGzKOKB4VkQi2YY7bj7hwri4EUHgIZlYuxST57L68CyTVwnF8c39dK6xflea4fkn+3TlNakFw0rrP3iqy8bkaU2cHnMyWIsYF4fbec1JnKngtIGiungvV9QTJzTpMF7ufEFiYl2uzCZgZGhmXsFDo9WoMjKHTJcbM0cm2OWWOrllOGdY2V580szaJR293jQx0OvNhxA3kTAe1aNmpBOfWhhjxxQsPCaPeHTdNG2L3iN9gYT8mms84ENO7OSUYsiMYMas9EMybyYY3Mvd4NUruIxlRgT84kpgyecC/8iQJwvI7vkdZRLlzQ0B614VCA3RH27ZULODSCPz2oFHFfHrMvdxGa4FTYJCWQFBAltWuPjQ8wmNdnKWX85jlc9MPlJ5WK8VIC1f5hVJd6qjSt009WNEt/y6h9xb5qixgZmBRkGpNe/2fyzx1sn0gyVm90wQXDSoT1fWhxZKJciPuHMvYcw== eric.loots@gmail.com
+    lock_passwd: false
+    ssh_pwauth: true
+    chpasswd: { expire: false }
+
+package_upgrade: false
+
+# Static IP address
+write_files:
+
+  - content: |
+      # Cluster #0
+      192.168.200.10 node-0
+      192.168.200.11 node-1
+      192.168.200.12 node-2
+      192.168.200.13 node-3
+      192.168.200.14 node-4
+    owner: root:staff
+    permissions: '0755'
+    path: /home/akkapi/cluster-hosts
+
+  - content: |
+      curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+      sudo apt-get update
+      sudo apt-get -y upgrade
+      echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+      sudo apt-get update
+      sudo apt-get install -qy kubelet kubeadm kubectl kubernetes-cni
+    owner: root:staff
+    permissions: '0755'
+    path: /usr/local/bin/install-kubernetes
+
+  - content: |
+      # Telegraf Configuration
+      #
+      # Telegraf is entirely plugin driven. All metrics are gathered from the
+      # declared inputs, and sent to the declared outputs.
+      #
+      # Plugins must be declared in here to be active.
+      # To deactivate a plugin, comment out the name and any variables.
+      #
+      # Use 'telegraf -config telegraf.conf -test' to see what metrics a config
+      # file would generate.
+      #
+      # Environment variables can be used anywhere in this config file, simply surround
+      # them with ${}. For strings the variable must be within quotes (ie, "${STR_VAR}"),
+      # for numbers and booleans they should be plain (ie, ${INT_VAR}, ${BOOL_VAR})
+      
+      [global_tags]
+      [agent]
+        interval = "10s"
+        round_interval = true
+        metric_batch_size = 1000
+        metric_buffer_limit = 10000
+        collection_jitter = "0s"
+        flush_interval = "10s"
+        flush_jitter = "0s"
+        precision = ""
+        hostname = ""
+        omit_hostname = false
+      
+      [[outputs.influxdb]]
+        namepass = ["cpu",
+                    "net",
+                    "disk",
+                    "mem",
+                    "swap",
+                    "gpu_temperature",
+                    "cpu_temperature",
+                    "net",
+                    "netstat",
+                    "google_ping",
+                    "docker",
+                    "google_dns",
+                    "kernel",
+                    "system",
+                    "processes",
+                    "diskio" 
+                   ]
+        urls = ["http://{{ ds.meta_data.influxdb_server_node }}:{{ ds.meta_data.influxdb_server_port }}"]
+        database = "rpi_monitoring"
+        username = "demo"
+        password = "demo"
+      
+      [[inputs.cpu]]
+        name_override = "cpu"
+        percpu = true
+        totalcpu = true
+        collect_cpu_time = false
+        report_active = false
+      [[inputs.disk]]
+        name_override = "disk"
+        ignore_fs = ["tmpfs", "devtmpfs", "devfs", "iso9660", "overlay", "aufs", "squashfs"]
+      [[inputs.mem]]
+        name_override = "mem"
+      [[inputs.swap]]
+        name_override = "swap"
+      [[inputs.file]]
+        files = ["/sys/class/thermal/thermal_zone0/temp"]
+        name_override = "cpu_temperature"
+        data_format = "value"
+        data_type = "integer"
+      [[inputs.exec]]
+        name_override = "gpu_temperature"
+        commands = [ "/usr/bin/vcgencmd measure_temp" ]
+        data_format = "grok"
+        grok_patterns = ["%{NUMBER:value:float}"]
+      [[inputs.net]]
+        name_override = "net"
+        interfaces = ["eth0"]
+      [[inputs.netstat]]
+        name_override = "netstat"
+      [[inputs.ping]]
+        urls = ["www.google.com"] # required
+        count = 4
+        interface = "eth0"
+        name_override = "google_ping"
+      [[inputs.docker]]
+        name_override = "docker"
+        endpoint = "unix:///var/run/docker.sock"
+      [[inputs.dns_query]]
+        servers = ["8.8.8.8"]
+        domains = ["."]
+        record_type = "A"
+        timeout = 10
+        name_override = "google_dns"
+      [[inputs.kernel]]
+        name_override = "kernel"
+      [[inputs.system]]
+        name_override = "system"
+      [[inputs.processes]]
+        name_override = "processes"
+      [[inputs.diskio]]
+        name_override = "diskio"
+    owner: root:root
+    permissions: '0644'
+    path: /home/akkapi/telegraf.conf
+
+  - content: |
+      # Telegraf Configuration
+      #
+      # Telegraf is entirely plugin driven. All metrics are gathered from the
+      # declared inputs, and sent to the declared outputs.
+      #
+      # Plugins must be declared in here to be active.
+      # To deactivate a plugin, comment out the name and any variables.
+      #
+      # Use 'telegraf -config telegraf.conf -test' to see what metrics a config
+      # file would generate.
+      #
+      # Environment variables can be used anywhere in this config file, simply surround
+      # them with ${}. For strings the variable must be within quotes (ie, "${STR_VAR}"),
+      # for numbers and booleans they should be plain (ie, ${INT_VAR}, ${BOOL_VAR})
+      
+      
+      [global_tags]
+      [agent]
+        interval = "10s"
+        round_interval = true
+        metric_batch_size = 1000
+        metric_buffer_limit = 10000
+        collection_jitter = "0s"
+        flush_interval = "10s"
+        flush_jitter = "0s"
+        precision = ""
+        hostname = ""
+        omit_hostname = false
+      
+      [[outputs.influxdb]]
+        namepass = ["smappee-data-test"]
+        alias = "smappee-out"
+        urls = ["http://{{ ds.meta_data.influxdb_server_node }}:{{ ds.meta_data.influxdb_server_port }}"]
+        database = "smappee_test"
+        username = "demo"
+        password = "demo"
+      
+      
+      [[inputs.mqtt_consumer]]
+        alias = "smappee-test"
+        name_override = "smappee-data-test"
+        servers = ["tcp://{{ ds.meta_data.mqtt_broker_node }}:{{ ds.meta_data.mqtt_broker_port }}"]
+        topics = [
+          "servicelocation/{{ ds.meta_data.smappee_solar_id }}/realtime"
+        ]
+        # The "host" tag is irrelevant in this use case. Drop it
+        tagexclude = ["host"]
+        data_format = "json_v2"
+        [[inputs.mqtt_consumer.json_v2]]
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(ctInput==2).power"
+            rename = "consumption"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(ctInput==1).power"
+            rename = "solar"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "voltages.#.voltage"
+            type = "float"
+      
+      [[processors.regex]]
+        namepass = ["smappee-data-test"]
+        [[processors.regex.tags]]
+          key = "topic"
+          pattern = ".*/(.*)/.*"
+          replacement = "smappee/${1}"
+      
+      # Keep the aggregate basicstats of each metric passing through.
+      [[aggregators.basicstats]]
+        namepass = ["smappee-data-test"]
+        ## The period on which to flush & clear the aggregator.
+        period = "60s"
+      
+        ## If true, the original metric will be dropped by the
+        ## aggregator and will not get sent to the output plugins.
+        drop_original = true
+      
+        ## Configures which basic stats to push as fields
+        stats = ["mean"]
+    owner: root:root
+    permissions: '0644'
+    path: /home/akkapi/smappee.conf
+
+  - content: |
+      # Telegraf Configuration
+      #
+      # Telegraf is entirely plugin driven. All metrics are gathered from the
+      # declared inputs, and sent to the declared outputs.
+      #
+      # Plugins must be declared in here to be active.
+      # To deactivate a plugin, comment out the name and any variables.
+      #
+      # Use 'telegraf -config telegraf.conf -test' to see what metrics a config
+      # file would generate.
+      #
+      # Environment variables can be used anywhere in this config file, simply surround
+      # them with ${}. For strings the variable must be within quotes (ie, "${STR_VAR}"),
+      # for numbers and booleans they should be plain (ie, ${INT_VAR}, ${BOOL_VAR})
+      
+      
+      [global_tags]
+      [agent]
+        interval = "10s"
+        round_interval = true
+        metric_batch_size = 1000
+        metric_buffer_limit = 10000
+        collection_jitter = "0s"
+        flush_interval = "10s"
+        flush_jitter = "0s"
+        precision = ""
+        hostname = ""
+        omit_hostname = false
+      
+      [[outputs.influxdb]]
+        namepass = ["smappee-data-2"]
+        alias = "smappee-out-2"
+        urls = ["http://{{ ds.meta_data.influxdb_server_node }}:{{ ds.meta_data.influxdb_server_port }}"]
+        database = "smappee_monitoring_2"
+        username = "demo"
+        password = "demo"
+      
+      
+      [[inputs.mqtt_consumer]]
+        alias = "smappee-2"
+        name_override = "smappee-data-2"
+        servers = ["tcp://{{ ds.meta_data.mqtt_broker_node }}:{{ ds.meta_data.mqtt_broker_port }}"]
+        topics = [
+          "servicelocation/{{ ds.meta_data.smappee_genius_id }}/realtime"
+        ]
+        # The "host" tag is irrelevant in this use case. Drop it
+        tagexclude = ["host"]
+        data_format = "json_v2"
+        [[inputs.mqtt_consumer.json_v2]]
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500053415/0$).power"
+            rename = "verdieping-1-stopkontakten"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500053415/0$).cosPhi"
+            rename = "verdieping-1-stopkontakten-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500053415/0$).apparentPower"
+            rename = "verdieping-1-stopkontakten-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500053415/1$).power"
+            rename = "garage"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500053415/1$).cosPhi"
+            rename = "garage-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500053415/1$).apparentPower"
+            rename = "garage-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/0$).power"
+            rename = "fornuis"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/0$).cosPhi"
+            rename = "fornuis-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/0$).apparentPower"
+            rename = "fornuis-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/1$).power"
+            rename = "oven"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/1$).cosPhi"
+            rename = "oven-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/1$).apparentPower"
+            rename = "oven-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/2$).power"
+            rename = "gelijkvloers-stopkontakten"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/2$).cosPhi"
+            rename = "gelijkvloers-stopkontakten-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/2$).apparentPower"
+            rename = "gelijkvloers-stopkontakten-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/3$).power"
+            rename = "vaatwasser"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/3$).cosPhi"
+            rename = "vaatwasser-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047903/3$).apparentPower"
+            rename = "vaatwasser-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/0$).power"
+            rename = "zolder-verlichting"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/0$).cosPhi"
+            rename = "zolder-verlichting-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/0$).apparentPower"
+            rename = "zolder-verlichting-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/1$).power"
+            rename = "zolder-stopkontakten-network-switch"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/1$).cosPhi"
+            rename = "zolder-stopkontakten-network-switch-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/1$).apparentPower"
+            rename = "zolder-stopkontakten-network-switch-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/2$).power"
+            rename = "tuinhuis-fietsgarage"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/2$).cosPhi"
+            rename = "tuinhuis-fietsgarage-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/2$).apparentPower"
+            rename = "tuinhuis-fietsgarage-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/3$).power"
+            rename = "airco-zolder-en-slaapkamer"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/3$).cosPhi"
+            rename = "airco-zolder-en-slaapkamer-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500048161/3$).apparentPower"
+            rename = "airco-zolder-en-slaapkamer-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047926/0$).power"
+            rename = "zolder-stopkontakten-printer"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047926/0$).cosPhi"
+            rename = "zolder-stopkontakten-printer-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047926/0$).apparentPower"
+            rename = "zolder-stopkontakten-printer-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047926/1$).power"
+            rename = "zolder-bureau"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047926/1$).cosPhi"
+            rename = "zolder-bureau-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047926/1$).apparentPower"
+            rename = "zolder-bureau-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047926/2$).power"
+            rename = "zolder-zekeringkast"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047926/2$).cosPhi"
+            rename = "zolder-zekeringkast-cosPhi"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "channelPowers.#(formula==$5500047926/2$).apparentPower"
+            rename = "zolder-zekeringkast-apparentPower"
+            type = "float"
+      
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "voltages.#(phaseId==0).voltage"
+            rename = "voltage"
+            type = "float"
+          [[inputs.mqtt_consumer.json_v2.field]]
+            path = "measuredFrequency"
+            rename = "measuredFrequency"
+            type = "float"
+      
+      [[processors.regex]]
+        namepass = ["smappee-data-2"]
+        [[processors.regex.tags]]
+          key = "topic"
+          pattern = ".*/(.*)/.*"
+          replacement = "smappee/${1}"
+      
+      # Keep the aggregate basicstats of each metric passing through.
+      [[aggregators.basicstats]]
+        namepass = ["smappee-data-2"]
+        ## The period on which to flush & clear the aggregator.
+        period = "60s"
+      
+        ## If true, the original metric will be dropped by the
+        ## aggregator and will not get sent to the output plugins.
+        drop_original = true
+      
+        ## Configures which basic stats to push as fields
+        stats = ["mean"]
+    owner: root:root
+    permissions: '0644'
+    path: /home/akkapi/smappee-2.conf
+
+  - content: |
+      #!/bin/bash -e
+
+      cat > /home/akkapi/.profile-tmux <<EOF
+      tnr() {
+         tmux new -s run
+      }
+
+      tr() {
+         tmux attach -t run
+      }
+
+      tnl() {
+         tmux new -s log
+      }
+
+      tl() {
+         tmux attach -t log
+      }
+
+      tkillall() {
+         for session in \`tmux ls | sed -e 's/:.*//'\`;do
+           tmux kill-session -t \$session
+         done
+      }
+      EOF
+
+      cat >> /home/akkapi/.profile <<EOF
+
+      . .profile-tmux
+      EOF
+    owner: root:staff
+    permissions: '0755'
+    path: /usr/local/bin/finish-install
+
+  - encoding: b64
+  - content: |
+      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
+      AAAAAAAAAAAAAAAAAAAAAAAAHQAAACAAAAAAAAAAAAAAAAAAAAAAAAAAVQEAABEAAAAAAAAAAAAA
+      AAAAAAAAAAAA/wAAABIAAAAAAAAAAAAAAAAAAAAAAAAA1gAAABIAAAAAAAAAAAAAAAAAAAAAAAAA
+      wgAAABIAAAAAAAAAAAAAAAAAAAAAAAAAQgEAABIAAAAAAAAAAAAAAAAAAAAAAAAABQEAABIAAAAA
+      AAAAAAAAAAAAAAAAAAAA8wEAABIAAAAAAAAAAAAAAAAAAAAAAAAAqAAAABIAAAAAAAAAAAAAAAAA
+      AAAAAAAAGgEAABIAAAAAAAAAAAAAAAAAAAAAAAAAbgAAABIAAAAAAAAAAAAAAAAAAAAAAAAAYAAA
+      ABIAAAAAAAAAAAAAAAAAAAAAAAAALAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAiAAAABIAAAAAAAAA
+      AAAAAAAAAAAAAAAAEgEAABIAAAAAAAAAAAAAAAAAAAAAAAAAoQAAABIAAAAAAAAAAAAAAAAAAAAA
+      AAAAhwAAABIAAAAAAAAAAAAAAAAAAAAAAAAA4wAAABIAAAAAAAAAAAAAAAAAAAAAAAAAdQMAABIA
+      DQDUZgAAAAAAABgBAAAAAAAAywMAABIADQBEVwAAAAAAAJgAAAAAAAAAnAEAABIADQAUJAAAAAAA
+      ANwAAAAAAAAAwAMAABIADQDIYwAAAAAAAFABAAAAAAAAHQMAABEAFwCgkAEAAAAAACAAAAAAAAAA
+      HQIAABAAGABwlQEAAAAAAAAAAAAAAAAAPgIAABEAFwAckAEAAAAAAAQAAAAAAAAAgQIAABIADQDw
+      JAAAAAAAAPgAAAAAAAAAuAEAABIADQAIWwAAAAAAAGAAAAAAAAAAJwMAABIADQAYZQAAAAAAALwB
+      AAAAAAAAKAIAABIADQAQPgAAAAAAAMQAAAAAAAAAWgIAABEAFwDAkAEAAAAAACAAAAAAAAAAuAIA
+      ABIADQDcVwAAAAAAALgAAAAAAAAA5QMAABIADQAUPQAAAAAAAPwAAAAAAAAA7wEAABIADQCgXQAA
+      AAAAAFABAAAAAAAAjgIAABAAFwAAkAEAAAAAAAAAAAAAAAAA3AEAABEADwAAbgAAAAAAABAAAAAA
+      AAAAqgIAABIADQDsWAAAAAAAAEABAAAAAAAAoQMAABEAFwAgkAEAAAAAAAQAAAAAAAAA1wMAABEA
+      DwC4bQAAAAAAABgAAAAAAAAAkAIAACAAFwAAkAEAAAAAAAAAAAAAAAAAcwIAABEADwDQbQAAAAAA
+      ACAAAAAAAAAAfwMAABIADQC4SQAAAAAAAGgGAAAAAAAAwQEAABIADQCYJgAAAAAAAIQAAAAAAAAA
+      VQMAABAAGABwlQEAAAAAAAAAAAAAAAAAUAIAABIADQDcJwAAAAAAAGwGAAAAAAAAaQIAABEAFwAk
+      kAEAAAAAAAQAAAAAAAAAxAIAABIADQBAVgAAAAAAAAQBAAAAAAAA8gMAABIADQCUWAAAAAAAAEAA
+      AAAAAAAA8gIAABIADQCwUAAAAAAAALgAAAAAAAAARgMAABEAFABQhgEAAAAAAEAAAAAAAAAAlwMA
+      ABIADQD4WwAAAAAAAKgBAAAAAAAAiwMAABIADQAgUAAAAAAAAJAAAAAAAAAAEAMAABEADwAgbgAA
+      AAAAABAAAAAAAAAAggAAABIADQBILgAAAAAAAKwBAAAAAAAABQMAABIADQDsZwAAAAAAACAAAAAA
+      AAAAzwEAABIADQCgYQAAAAAAACgCAAAAAAAAkQEAABIADQBQYAAAAAAAAFABAAAAAAAAMwMAABEA
+      GABQlQEAAAAAAAQAAAAAAAAAaQMAABAAGABIlQEAAAAAAAAAAAAAAAAAmwIAABEAFAAwhgEAAAAA
+      ACAAAAAAAAAAQQMAABAAGABwlQEAAAAAAAAAAAAAAAAAXQMAABEADwAQbgAAAAAAABAAAAAAAAAA
+      DQIAABIADQDUPgAAAAAAAOgBAAAAAAAA4wIAABEADwAgaAAAAAAAAAQAAAAAAAAAlAIAABIADQAA
+      IwAAAAAAADQAAAAAAAAA/wEAABIADQBoUQAAAAAAAJQEAAAAAAAA+AEAABAAFwBIlQEAAAAAAAAA
+      AAAAAAAARAIAABEADwDwbQAAAAAAABAAAAAAAAAAAwQAABEAFwAokAEAAAAAAHAAAAAAAAAAugEA
+      ABIADQAsWgAAAAAAANwAAAAAAAAA5wEAABEAFwDgkAEAAAAAACAAAAAAAAAAqAMAABIADQD8VQAA
+      AAAAAEQAAAAAAAAADQQAABIADQDoJQAAAAAAALAAAAAAAAAAHAIAABAAGABwlQEAAAAAAAAAAAAA
+      AAAAqgEAABAAGABIlQEAAAAAAAAAAAAAAAAANQIAABIADQDwXgAAAAAAAGABAAAAAAAA/gIAABEA
+      GABYlQEAAAAAAAgAAAAAAAAAAF9JVE1fZGVyZWdpc3RlclRNQ2xvbmVUYWJsZQBfX2dtb25fc3Rh
+      cnRfXwBfSVRNX3JlZ2lzdGVyVE1DbG9uZVRhYmxlAHBvdwBfX2N4YV9maW5hbGl6ZQBtYWxsb2MA
+      dXNsZWVwAGdldHBpZABtdW5tYXAAX19saWJjX3N0YXJ0X21haW4AZnByaW50ZgBhdG9pAGZvcGVu
+      AGZjbG9zZQB1bmxpbmsAc3RybmNhc2VjbXAAbWVtc2V0AG9wdGFyZwBnZXRvcHRfbG9uZwBzcHJp
+      bnRmAGFib3J0AHN0ZGVycgBpb2N0bABzaWdhY3Rpb24AZ2V0cGFnZXNpemUAbWtub2QAZnJlYWQA
+      cGVycm9yAHB1dGNoYXIAZndyaXRlAGdudV9kZXZfbWFrZWRldgBfX3N0YWNrX2Noa19mYWlsAG1t
+      YXAAY2xvY2tfZ2V0dGltZQBfX3N0YWNrX2Noa19ndWFyZABsaWJtLnNvLjYAbGliYy5zby42AGxk
+      LWxpbnV4LWFhcmNoNjQuc28uMQBtZW1fdW5sb2NrAG1hdHJpeF9yZW5kZXIAX19ic3Nfc3RhcnRf
+      XwB1bm1hcG1lbQBtYXRyaXhfYm90dG9tAGV4ZWN1dGVfY29kZQBwY21fcGluX2ZzAGRvdHNwb3MA
+      bWVtX2ZyZWUAX2VkYXRhAHdzMjgxMV9yZW5kZXIAd3MyODExX2NsZWFudXAAX19ic3NfZW5kX18A
+      cGNtX3Jhd19pbml0AG1lbV9sb2NrAHdpZHRoAHBjbV9waW5fY2xrAHBhcnNlYXJncwBkb3Rjb2xv
+      cnNfcmdidwBsZWRfY291bnQAcHdtX3Bpbl9jaGFuMQBtYXRyaXhfcmFpc2UAX19kYXRhX3N0YXJ0
+      AHB3bV9waW5fdGFibGVzAHJwaV9od19kZXRlY3QAcGNtX3Bpbl9hbHQAd3MyODExX3NldF9jdXN0
+      b21fZ2FtbWFfZmFjdG9yAF9JT19zdGRpbl91c2VkAHdzMjgxMV93YWl0AG1hdHJpeABtYm94X2Ns
+      b3NlAHBjbV9waW5fZG91dABkb3Rjb2xvcnMAZXhlY3V0ZV9xcHUAY2xlYXJfb25fZXhpdABfZW5k
+      AHBjbV9waW5fdGFibGVzAF9fZW5kX18AcGNtX3Bpbl9kaW4AX19ic3Nfc3RhcnQAbWJveF9vcGVu
+      AHdzMjgxMV9pbml0AHdzMjgxMV9maW5pAG1lbV9hbGxvYwBoZWlnaHQAd3MyODExX2dldF9yZXR1
+      cm5fdF9zdHIAcXB1X2VuYWJsZQBwd21fcGluX2FsdABwd21fcGluX2NoYW4wAHB3bV9yYXdfaW5p
+      dABkbWFudW1fdG9fb2Zmc2V0AGxlZHN0cmluZwBtYXRyaXhfY2xlYXIAR0xJQkNfMi4xNwBHTElC
+      Q18yLjI5AEdMSUJDXzIuMzMAR0xJQkNfMi4zNAAAAAAAAAACAAMAAgABAAIAAgACAAIABAACAAIA
+      AgACAAIAAgACAAIAAgACAAIAAgACAAEABQAGAAIAAgACAAIAAgACAAIAAgACAAEAAgACAAIAAgAC
+      AAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEA
+      AQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQAB
+      AAEAAQABAHsBAAAQAAAAIAAAAJeRlgYAAAUAGgQAAAAAAAABAAEAZwEAABAAAAAgAAAAiZGWBgAA
+      BAAlBAAAAAAAAAEAAwBxAQAAEAAAAAAAAACzkZYGAAAGADAEAAAQAAAAtJGWBgAAAwA7BAAAEAAA
+      AJeRlgYAAAIAGgQAAAAAAACohQEAAAAAAAMEAAAAAAAAECQAAAAAAACwhQEAAAAAAAMEAAAAAAAA
+      wCMAAAAAAAC4hQEAAAAAAAMEAAAAAAAAMGwAAAAAAADAhQEAAAAAAAMEAAAAAAAAOGwAAAAAAADI
+      hQEAAAAAAAMEAAAAAAAASGwAAAAAAADQhQEAAAAAAAMEAAAAAAAAWGwAAAAAAADYhQEAAAAAAAME
+      AAAAAAAAgGwAAAAAAADghQEAAAAAAAMEAAAAAAAAmGwAAAAAAADohQEAAAAAAAMEAAAAAAAAqGwA
+      AAAAAADwhQEAAAAAAAMEAAAAAAAA0GwAAAAAAAD4hQEAAAAAAAMEAAAAAAAA8GwAAAAAAAAAhgEA
+      AAAAAAMEAAAAAAAAEG0AAAAAAAAIhgEAAAAAAAMEAAAAAAAAMG0AAAAAAAAQhgEAAAAAAAMEAAAA
+      AAAAQG0AAAAAAAAYhgEAAAAAAAMEAAAAAAAAYG0AAAAAAAAghgEAAAAAAAMEAAAAAAAAgG0AAAAA
+      AAAohgEAAAAAAAMEAAAAAAAAoG0AAAAAAAA4hgEAAAAAAAMEAAAAAAAAuG0AAAAAAABIhgEAAAAA
+      AAMEAAAAAAAA0G0AAAAAAABYhgEAAAAAAAMEAAAAAAAA8G0AAAAAAABohgEAAAAAAAMEAAAAAAAA
+      AG4AAAAAAAB4hgEAAAAAAAMEAAAAAAAAEG4AAAAAAACIhgEAAAAAAAMEAAAAAAAAIG4AAAAAAACg
+      hgEAAAAAAAMEAAAAAAAAcG4AAAAAAAC4hgEAAAAAAAMEAAAAAAAAiG4AAAAAAADQhgEAAAAAAAME
+      AAAAAAAAoG4AAAAAAADohgEAAAAAAAMEAAAAAAAAuG4AAAAAAAAAhwEAAAAAAAMEAAAAAAAA2G4A
+      AAAAAAAYhwEAAAAAAAMEAAAAAAAA8G4AAAAAAAAwhwEAAAAAAAMEAAAAAAAACG8AAAAAAABIhwEA
+      AAAAAAMEAAAAAAAAKG8AAAAAAABghwEAAAAAAAMEAAAAAAAAQG8AAAAAAAB4hwEAAAAAAAMEAAAA
+      AAAAWG8AAAAAAACQhwEAAAAAAAMEAAAAAAAAcG8AAAAAAACohwEAAAAAAAMEAAAAAAAAiG8AAAAA
+      AADAhwEAAAAAAAMEAAAAAAAAoG8AAAAAAADYhwEAAAAAAAMEAAAAAAAAuG8AAAAAAADwhwEAAAAA
+      AAMEAAAAAAAA0G8AAAAAAAAIiAEAAAAAAAMEAAAAAAAA6G8AAAAAAAAgiAEAAAAAAAMEAAAAAAAA
+      CHAAAAAAAAA4iAEAAAAAAAMEAAAAAAAAKHAAAAAAAABQiAEAAAAAAAMEAAAAAAAASHAAAAAAAABo
+      iAEAAAAAAAMEAAAAAAAAaHAAAAAAAACAiAEAAAAAAAMEAAAAAAAAaHAAAAAAAACYiAEAAAAAAAME
+      AAAAAAAAaHAAAAAAAACwiAEAAAAAAAMEAAAAAAAAaHAAAAAAAADIiAEAAAAAAAMEAAAAAAAAiHAA
+      AAAAAADgiAEAAAAAAAMEAAAAAAAAiHAAAAAAAAD4iAEAAAAAAAMEAAAAAAAAiHAAAAAAAAAQiQEA
+      AAAAAAMEAAAAAAAAiHAAAAAAAAAoiQEAAAAAAAMEAAAAAAAAiHAAAAAAAABAiQEAAAAAAAMEAAAA
+      AAAAkHAAAAAAAABYiQEAAAAAAAMEAAAAAAAAkHAAAAAAAABwiQEAAAAAAAMEAAAAAAAAkHAAAAAA
+      AACIiQEAAAAAAAMEAAAAAAAAiHAAAAAAAACgiQEAAAAAAAMEAAAAAAAAiHAAAAAAAAC4iQEAAAAA
+      AAMEAAAAAAAAiHAAAAAAAADQiQEAAAAAAAMEAAAAAAAAmHAAAAAAAADoiQEAAAAAAAMEAAAAAAAA
+      mHAAAAAAAAAAigEAAAAAAAMEAAAAAAAAmHAAAAAAAAAYigEAAAAAAAMEAAAAAAAAqHAAAAAAAAAw
+      igEAAAAAAAMEAAAAAAAAqHAAAAAAAABIigEAAAAAAAMEAAAAAAAAwHAAAAAAAABgigEAAAAAAAME
+      AAAAAAAA2HAAAAAAAAB4igEAAAAAAAMEAAAAAAAA8HAAAAAAAACQigEAAAAAAAMEAAAAAAAAEHEA
+      AAAAAACoigEAAAAAAAMEAAAAAAAAIHEAAAAAAADAigEAAAAAAAMEAAAAAAAAIHEAAAAAAADYigEA
+      AAAAAAMEAAAAAAAAMHEAAAAAAADwigEAAAAAAAMEAAAAAAAAMHEAAAAAAAAIiwEAAAAAAAMEAAAA
+      AAAAQHEAAAAAAAAgiwEAAAAAAAMEAAAAAAAAWHEAAAAAAAA4iwEAAAAAAAMEAAAAAAAAWHEAAAAA
+      AABQiwEAAAAAAAMEAAAAAAAAWHEAAAAAAABoiwEAAAAAAAMEAAAAAAAAaHEAAAAAAACAiwEAAAAA
+      AAMEAAAAAAAAaHEAAAAAAACYiwEAAAAAAAMEAAAAAAAAaHEAAAAAAACwiwEAAAAAAAMEAAAAAAAA
+      aHEAAAAAAADIiwEAAAAAAAMEAAAAAAAAcHEAAAAAAADgiwEAAAAAAAMEAAAAAAAAcHEAAAAAAAD4
+      iwEAAAAAAAMEAAAAAAAAeHEAAAAAAAAQjAEAAAAAAAMEAAAAAAAAgHEAAAAAAAAojAEAAAAAAAME
+      AAAAAAAAgHEAAAAAAABAjAEAAAAAAAMEAAAAAAAAgHEAAAAAAABYjAEAAAAAAAMEAAAAAAAAgHEA
+      AAAAAABwjAEAAAAAAAMEAAAAAAAAiHEAAAAAAADwjwEAAAAAAAMEAAAAAAAASC4AAAAAAAAIkAEA
+      AAAAAAMEAAAAAAAACJABAAAAAAAAkQEAAAAAAAMEAAAAAAAA2GoAAAAAAAAgkQEAAAAAAAMEAAAA
+      AAAA4GoAAAAAAABAkQEAAAAAAAMEAAAAAAAA6GoAAAAAAABgkQEAAAAAAAMEAAAAAAAA8GoAAAAA
+      AACAkQEAAAAAAAMEAAAAAAAA+GoAAAAAAACgkQEAAAAAAAMEAAAAAAAAAGsAAAAAAADAkQEAAAAA
+      AAMEAAAAAAAACGsAAAAAAADgkQEAAAAAAAMEAAAAAAAAEGsAAAAAAAAAkgEAAAAAAAMEAAAAAAAA
+      GGsAAAAAAADAjwEAAAAAAAEEAAAGAAAAAAAAAAAAAADIjwEAAAAAAAEEAAAHAAAAAAAAAAAAAADQ
+      jwEAAAAAAAEEAAAKAAAAAAAAAAAAAADYjwEAAAAAAAEEAAAMAAAAAAAAAAAAAADgjwEAAAAAAAEE
+      AAAZAAAAAAAAAAAAAADojwEAAAAAAAEEAAAaAAAAAAAAAAAAAAD4jwEAAAAAAAEEAAAlAAAAAAAA
+      AAAAAACgjgEAAAAAAAIEAAADAAAAAAAAAAAAAACojgEAAAAAAAIEAAAEAAAAAAAAAAAAAACwjgEA
+      AAAAAAIEAAAFAAAAAAAAAAAAAAC4jgEAAAAAAAIEAAAHAAAAAAAAAAAAAADAjgEAAAAAAAIEAAAI
+      AAAAAAAAAAAAAADIjgEAAAAAAAIEAAAJAAAAAAAAAAAAAADQjgEAAAAAAAIEAAALAAAAAAAAAAAA
+      AADYjgEAAAAAAAIEAAANAAAAAAAAAAAAAADgjgEAAAAAAAIEAAAOAAAAAAAAAAAAAADojgEAAAAA
+      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
+      C0C5AAQAEeALALmgAADwAHAAkQAAQLnhC0C5PwAAayv6/1QfIAPVHyAD1f9DAJHAA1/W/0MA0f8P
+      ALkxAAAU/wsAuSYAABSgAADwAGAVkQEAQPngD0C5AgQAEaAAAPAAcACRAABAuUJ8ABugAADwAHAA
+      kQAAQLlCAAAL4AtAuUAAAEsAfECTAPR+0wAQANEhAACLoAAA8ABgFZECAED5oAAA8ABwAJEDAEC5
+      4A9AuWN8ABvgC0C5YAAACwB8QJMA9H7TQAAAiyEAQLkBAAC54AtAuQAEABHgCwC5oAAA8ABwAJEA
+      AEC54QtAuT8AAGvL+v9U4A9AuQAEABHgDwC5oAAA8ACAAJEAAEC5AAQAUeEPQLk/AABrS/n/VB8g
+      A9UfIAPV/0MAkcADX9b/QwDR/w8AuSAAABT/CwC5FQAAFKAAAPAAYBWRAQBA+aAAAPAAcACRAgBA
+      ueAPQLlCfAAb4AtAuUAAAAsAfECTAPR+0yAAAIuhAADwIYACkSEMQLkBAAC54AtAuQAEABHgCwC5
+      oAAA8ABwAJEAAEC54QtAuT8AAGvr/P9U4A9AuQAEABHgDwC5oAAA8ACAAJEAAEC54Q9AuT8AAGuL
+      +/9UHyAD1R8gA9X/QwCRwANf1v9DANHgDwC5oAAA8ABgFZEBAED54A9AuQAEAFHiAwBrAAgAEkII
+      ABIARIJaAHxAkwD0ftMgAACLHwAAuaAAAPAAYBWRAQBA+eAPQLniAwBrAAgAEkIIABIARIJaAHxA
+      kwD0ftMgAACLoQAA8CGAApEhFEC5AQAAuR8gA9X/QwCRwANf1v9DANHgDwC5oAAA8ABgApEfAAA5
+      HyAD1f9DAJHAA1/W/Xu1qf0DAJGgAADQAPRH+QEAQPnhVwD5AQCA0uBDAJEABABPAAAArQAAAa0A
+      AAKtAAADrQAggD0BAGaeAUgA+QAAAJAAcByR4AsA+eBDAJECAIDS4QMAqkAAgFKO/v+X4EMAkQIA
+      gNLhAwCq4AGAUon+/5cfIAPVoAAA0AD0R/niV0D5AQBA+UIAAesBAIDSQAAAVHj+/5f9e8uowANf
+      1v17u6n9AwCR4C8AueETAPniDwD5oAAA0AD0R/kBAED54ScA+QEAgNL/OwC54OMAkeQDAKqgAADw
+      AwAEkSAAAJACoCCR4RNA+eAvQLl6/v+X4D8AueA/QLkfBAAxAC8AVOA/QLkf5AFx4BAAVOA/QLkf
+      5AFxTCwAVOA/QLkf4AFxwBQAVOA/QLkf4AFxjCsAVOA/QLkf2AFxICkAVOA/QLkf2AFxzCoAVOA/
+      QLkfzAFx4BcAVOA/QLkfzAFxDCoAVOA/QLkfpAFx4AkAVOA/QLkfpAFxTCkAVOA/QLkfoAFxYAQA
+      VOA/QLkfoAFxjCgAVOA/QLkfnAFxoAYAVOA/QLkfnAFxzCcAVOA/QLkfkAFxwAgAVOA/QLkfkAFx
+      DCcAVOA/QLkfjAFxYAcAVOA/QLkfjAFxTCYAVOA/QLkfEAFxICYAVOA/QLkfEAFxjCUAVOA/QLkf
+      AABxoCUAVOA/QLkf/ABxgCQAVCUBABSgAADQAOhH+QQAQPngE0D5AQBA+aAAAPADQACR4gMBqiAA
+      AJAB4CCR4AMEqlP+/5egAADQAOhH+QMAQPngE0D5AABA+eIDAKogAACQASAhkeADA6pJ/v+XAACA
+      EsP9/5egAADQAOxH+QAAQPkfAADxwCEAVKAAANAA7Ef5AABA+d79/5fgQwC54A9A+eFDQLkBIAC5
+      BQEAFOAPQPkhAIBSASQAuQoBABSgAADwAEAVkSEAgFIBAAC5BQEAFKAAANAA7Ef5AABA+R8AAPEg
+      HwBUoAAA0ADsR/kAAED5x/3/l+BHALngR0C5HzQAcawAAFTgD0D54UdAuQEcALntAAAU4UdAuSAA
+      AJAA4CeRD/7/lwAAgBKV/f+XoAAA0ADsR/kAAED5HwAA8YAcAFSgAADQAOxH+QAAQPmw/f+X4QMA
+      KqAAAPAAgACRAQAAuaAAAPAAgACRAABAuR8AAHFtAQBUoAAA8ACAAJEBAEC5oAAA8ABwAJEAAEC5
+      IXwAG+APQPkBKAC5zQAAFKAAAPAAgACRAABAueEDACogAACQACAoker9/5cAAIAScP3/l6AAANAA
+      7Ef5AABA+R8AAPEgGABUoAAA0ADsR/kAAED5i/3/l+EDACqgAADwAHAAkQEAALmgAADwAHAAkQAA
+      QLkfAABxbQEAVKAAAPAAgACRAQBAuaAAAPAAcACRAABAuSF8ABvgD0D5ASgAuaoAABSgAADwAHAA
+      kQAAQLnhAwAqIAAAkACAKJHF/f+XAACAEkv9/5egAADQAOxH+QAAQPkfAADxwBMAVKAAANAA7Ef5
+      AABA+YIAgNLhAwCqIAAAkADgKJGm/f+XHwAAccEAAFTgD0D5AQCBUgECoHIBLAC5jwAAFKAAANAA
+      7Ef5AABA+YIAgNLhAwCqIAAAkAAAKZGX/f+XHwAAccEAAFTgD0D5AQGAUgECoHIBLAC5gAAAFKAA
+      ANAA7Ef5AABA+YIAgNLhAwCqIAAAkAAgKZGI/f+XHwAAccEAAFTgD0D5AQCCUgEBoHIBLAC5cQAA
+      FKAAANAA7Ef5AABA+YIAgNLhAwCqIAAAkABAKZF5/f+XHwAAccEAAFTgD0D5AQKAUgEBoHIBLAC5
+      YgAAFKAAANAA7Ef5AABA+YIAgNLhAwCqIAAAkABgKZFq/f+XHwAAcaEAAFTgD0D5AQGCUgEsALlU
+      AAAUoAAA0ADsR/kAAED5ggCA0uEDAKogAACQAIApkVz9/5cfAABxoQAAVOAPQPkBAoFSASwAuUYA
+      ABSgAADQAOxH+QAAQPmCAIDS4QMAqiAAAJAAoCmRTv3/lx8AAHHBAABU4A9A+QEAgVIBAqNyASwA
+      uTcAABSgAADQAOxH+QAAQPmCAIDS4QMAqiAAAJAAwCmRP/3/lx8AAHHBAABU4A9A+QEAglIBAaNy
+      ASwAuSgAABSgAADQAOxH+QAAQPnhAwCqIAAAkADgKZFB/f+XAACAEsf8/5egAADQAOhH+QQAQPng
+      E0D5AQBA+aAAAPADQACR4gMBqiAAAJAB4CCR4AMEqj/9/5cAAIASufz/lwAAgBK3/P+XAACAErX8
+      /5cfIAPViP7/Fx8gA9WG/v8XHyAD1YT+/xcfIAPVgv7/Fx8gA9WA/v8XHyAD1X7+/xcfIAPVfP7/
+      Fx8gA9UfIAPVoAAA0AD0R/niJ0D5AQBA+UIAAesBAIDSQAAAVN38/5f9e8WowANf1v17vKn9AwCR
+      8wsA+eAvALnhEwD5BACAUiMAgFIiAIBSIAAAkAFAKpGgAADwAEAAkZ78/5egAADwAqAAkeETQPng
+      L0C5VP7/l6AAAPAAcACRAABAuQF8QJOgAADwAIAAkQAAQLkAfECTIHwAmwD0ftOu/P+X4QMAqqAA
+      APAAYBWRAQAA+Rz+/5egAADwAKAAkbgGAJTgOwC54DtAuR8AAHGgAQBUoAAA0ADoR/kTAED54DtA
+      ucAJAJTiAwCqIAAAkAGAKpHgAxOq7Pz/l+A7QLk0AAAU/z8AuR0AABRz/f+X4D9Audv9/5c5/f+X
+      oAAA8ACgAJGLCACU4DsAueA7QLkfAABxgAEAVKAAANAA6Ef5EwBA+eA7QLmnCQCU4gMAqiAAAJAB
+      4CqR4AMTqtP8/5cMAAAUACSUUuAAoHK//P+X4D9AuQAEABHgPwC5oAAA8ABgApEAAEA5HwAAcQH8
+      /1SgAADwAEAVkQAAQLkfAABxwAAAVIv9/5cV/f+XoAAA8ACgAJFnCACUoAAA8ACgAJESCACUQAGA
+      UrD8/5fgO0C58wtA+f17xKjAA1/W/Xu8qf0DAJHgDwD54V8AOeJbADmgAACwAPRH+QEAQPnhHwD5
+      AQCA0uFfQDmgmZlSgJm5ciB8oJsA/GDTAHwDUwAcABLgKwC54V9AOaCZmVKAmblyIHygmwD8YNMC
+      fANT4AMCKgB0HlMAAAILAHgfUyAAAEsAHAAS4QMAKuADASoAeB9TAAABC+AvALkAAADwAYAskeDD
+      AJEiAEC5AgAAuSEIQHkBCAB54FtAOR8UAHFoAwBU4A9A+eErgLkAeGG44S9AueIAgFJBIMEa4QMh
+      KgIAAQrgD0D54SuAuQJ4IbjgD0D54SuAuQB4YbjhW0A5IXxAk+LDAJFBaGE44gMBKuEvQLlBIMEa
+      AgABKuAPQPnhK4C5AnghuAIAABQfIAPVoAAAsAD0R/niH0D5AQBA+UIAAesBAIDSQAAAVCD8/5f9
+      e8SowANf1v17van9AwCRoAAAsAD0R/kBAED54RcA+QEAgNLgYwCR4QMAqoAAgFLn+/+XHwAAcWAA
+      AFQAAIDSEAAAFOAPQPnhAwCqAEiI0uABoPIhfACb4BNA+eL5ntJiarzyonTT8oIY5PICfEKbQvxH
+      kwD8f5NAAADLIAAAi+EDAKqgAACwAPRH+eMXQPkCAED5YwAC6wIAgNJAAABU9/v/l+ADAar9e8Oo
+      wANf1v+DANHgBwD5/x8Auf8bALkYAAAU4gdA+eEbgLngAwGqAPR+0wAAAYsA8H3TQAAAiwAoQLnh
+      H0C5PwAAa0oBAFTiB0D54RuAueADAaoA9H7TAAABiwDwfdNAAACLAChAueAfALngG0C5AAQAEeAb
+      ALngG0C5HwQAce38/1TgH0C5/4MAkcADX9b9e7yp/QMAkeAPAPngD0D5AARA+eAbAPngD0D5AAhA
+      +eAfAPngD0D5AAhA+QAIQLngKwC5/ycAueAPQPkAHEC5egkAlOAvALngL0C5HwAAcWEAAFQAAIAS
+      bwAAFOAfQPkACEC54S9AuSAAAAvgLwC5AAAA8AKgLJGBBIBS4C9AudAJAJThAwCq4BtA+QEIAPng
+      G0D5AAhA+R8AAPFhAABUAACAElwAABTgG0D5AABAuR8EAHGAAABUHwgAcUACAFQkAAAU4CtAuQMw
+      SBEAAADwAqAskQEFgFLgAwMquQkAlOEDAKrgG0D5AQwA+eAbQPkADED5HwAA8WECAFQAAIASRQAA
+      FOArQLkDDEgRAAAA8AKgLJGBBIBS4AMDKqkJAJThAwCq4BtA+QEQAPngG0D5ABBA+R8AAPGhAABU
+      AACAEjUAABQfIAPVAgAAFB8gA9XgK0C5AwBIEQAAAPACoCyRgRaAUuADAyqWCQCU4QMAquAbQPkB
+      IAD54BtA+QAgQPkfAADxYQAAVAAAgBIiAAAU4BtA+QAAQLkfBABxgAAAVB8IAHHAAABUCQAAFAAU
+      glIAAqBy4CcAuQUAABQAE4JSAAKgcuAnALkfIAPV4SdAueArQLkjAAALAAAA8AKgLJEBAYBS4AMD
+      KnYJAJThAwCq4BtA+QEkAPngG0D5ACRA+R8AAPFhAABUAACAEgIAABQAAIBS/XvEqMADX9b9e72p
+      /QMAkeAPAPngD0D5AARA+eAXAPngF0D5AAhA+R8AAPGgAABU4BdA+QAIQPmBBIBSkwkAlOAXQPkA
+      DED5HwAA8aAAAFTgF0D5AAxA+QEFgFKLCQCU4BdA+QAQQPkfAADxoAAAVOAXQPkAEED5gQSAUoMJ
+      AJTgF0D5ACRA+R8AAPGgAABU4BdA+QAkQPkBAYBSewkAlOAXQPkAIED5HwAA8aAAAFTgF0D5ACBA
+      +YEWgFJzCQCUHyAD1f17w6jAA1/W/4MA0eAHAPnhAwD54AdA+QBAAZHgDwD54A9A+QAIQPnhA0D5
+      IAAAy+AXALngD0D5AQhAueAXQLkgAAAL/4MAkcADX9b9e7yp/QMAkeAPAPngD0D5AARA+eAXAPng
+      F0D5AAxA+eAbAPngF0D5ACRA+eAfAPngG0D5HwAAuUABgFIt+/+X4B9A+QEEgFIBQKtyAQAAuUAB
+      gFIn+/+XHyAD1eAfQPkAAEC5AAAZEh8AAHGB//9UHyAD1R8gA9X9e8SowANf1v17vKn9AwCR4A8A
+      +eAPQPkABED54BcA+eAXQPkAEED54BsA+eAXQPkAJED54B8A+eAbQPkfAAC5QAGAUg37/5fgH0D5
+      AQSAUgFAq3IBAAC5QAGAUgf7/5cfIAPV4B9A+QAAQLkAABkSHwAAcYH//1QfIAPVHyAD1f17xKjA
+      A1/W/Xu5qf0DAJHgDwD54A9A+QAEQPngIwD54CNA+QAIQPngJwD54CNA+QAYQPngKwD54CNA+QAM
+      QPngLwD54CNA+QAkQPngMwD54CNA+QBoQLngMwC54A9A+QAYQLngNwC54A9A+QAIQPngNwD54DdA
+      +QAAQLngOwC5AACfUoAkoHLgLwC54DtAuR8MAHGBAABUADCfUuBmoHLgLwC54A9A+Zj//5fhN0C5
+      4AMBKgB4H1MAAAEL4S9AuSAIwBoATBRTASwUEgBAq1IhAAAq4DNA+QEEALngM0D5IQCAUgFAq3IB
+      AAC54DNA+SECgFIBQKtyAQAAuUABgFK++v+XHyAD1eAzQPkAAEC5AAAZEh8AAHGA//9U4C9A+QEE
+      gFIBEAC5QAGAUrP6/5fgL0D5AQiAUgEAALlAAYBSrvr/l+AvQPlh4IBSAQCwcgEIALlAAYBSqPr/
+      l+AvQPlBRIRSAQAAueAPQPkAJEC5HwAAccAAAFTgL0D5AABAuQEAHDLgL0D5AQAAueAPQPkATEC5
+      HwAAccAAAFTgL0D5AABAuQEAFDLgL0D5AQAAuUABgFKR+v+X4C9A+QEAQLkgIIBSIQAAKuAvQPkB
+      AAC54TNAueADASoAeB9TAAABCwBoG1PiAwAq4TdAuaAUgFIhfAAbYNCbUmBjqHIgfKCbAPxg0wB8
+      ElNAAAALAHwDUwBwHRIAIAARAHgfU+A/ALngK0D5ASmAUqGAoHIBAAC54CNA+QAEQPnhAwCq4CNA
+      +SH//5fhAwAq4CtA+QEEALngK0D5AQOYUgHEr3IBCAC54T9AueArQPkBDAC54CtA+R8QALngK0D5
+      HxQAueAnQPkfAAC54CdA+R8UALkAAIBS/XvHqMADX9b9e7mp/QMAkeAPAPngD0D5AARA+eAjAPng
+      I0D5AAhA+eAnAPngI0D5ABhA+eArAPngI0D5ABBA+eAvAPngI0D5ACRA+eAzAPngI0D5AGhAueAz
+      ALngD0D5ABhAueA3ALngD0D5AAhA+eA3APngN0D5AABAueA7ALkAAJ9SgCSgcuAvALngO0C5HwwA
+      cYEAAFQAMJ9S4GagcuAvALngD0D5FP//l+E3QLngAwEqAHgfUwAAAQvhL0C5IAjAGgBMFFMBLBQS
+      AECrUiEAACrgM0D5AQQAueAzQPkhAIBSAUCrcgEAALngM0D5IQKAUgFAq3IBAAC5QAGAUhr6/5cf
+      IAPV4DNA+QAAQLkAABkSHwAAcYD//1TgL0D5IQCAUgEAALngL0D5IYCPUgEIALngL0D5AQG4UgEQ
+      ALngL0D5AABAuQEAHTLgL0D5AQAAuUABgFIE+v+X4C9A+QAAQLkBABcy4C9A+QEAALngL0D5AeCH
+      UgEAonIBFAC54TNAueADASoAeB9TAAABCwBoG1PiAwAq4TdAuaAUgFIhfAAbYNCbUmBjqHIgfKCb
+      APxg0wB8ElNAAAALAHwDUwBwHRIAIAAR4D8AueArQPkBKYBSQYCgcgEAALngI0D5AARA+eEDAKrg
+      I0D5kv7/l+EDACrgK0D5AQQAueArQPmBAIZSAcSvcgEIALnhP0C54CtA+QEMALngK0D5HxAAueAr
+      QPkfFAC54CdA+R8AALngJ0D5HxQAuQAAgFL9e8eowANf1v17vKn9AwCR4A8A+eAPQPkABED54BcA
+      +eAXQPkACED54BsA+eAXQPkAEED54B8A+eAXQPkAOEC54CcAueAbQPkBALBSAQAAuUABgFK2+f+X
+      4BtA+cEAgFIBAAC5QAGAUrH5/5fgG0D54SdAuQEEALngG0D54QCAUgEgALngG0D5IQCAUuEfonIB
+      AAC54BdA+QAAQLkfCABxwQAAVOAfQPkAAEC5AQAeMuAfQPkBAAC5HyAD1f17xKjAA1/W/Xu8qf0D
+      AJHgDwD54A9A+QAEQPkAIED54B8A+f8vALkxAAAU4g9A+eEvgLngAwGqAPR+0wAAAYsA8H3TQAAA
+      iwAgQLngNwC54DdAuR8AAHFABABU4A9A+QAEQPkAAEC5HwQAcYAAAFQfCABx4AAAVAsAABThN0C5
+      4C9AuawGAJTgMwC5CAAAFOE3QLlgAIBSzQYAlOAzALkDAAAUAACAEuAzALngM0C5HwAAcWoAAFQA
+      AIASEAAAFOA3QLkAHAAS4TNAuSEcABLiAwEq4QMAKuAfQPnC/P+X4C9AuQAEABHgLwC54C9AuR8E
+      AHHN+f9UAACAUv17xKjAA1/W/8MA0eAHAPngB0D5AARA+QAEQPngFwD54AdA+QAEQPkAaEC54CMA
+      ueEjQLngAwEqAHgfUwAAAQsAaBtT4gMAKuAHQPkBGEC5oBSAUiF8ABtg0JtSYGOociB8oJsA/GDT
+      AHwSU0AAAAsAfANTAHAdEgAgABEAeB9TAHwDU+AnALn/FwC5FwAAFOAXQLngHwC5/xsAuQwAABTg
+      H4C5APR+0+EXQPkgAACLHwAAueAfQLkACAAR4B8AueAbQLkABAAR4BsAueEbQLngJ0C5PwAAa0v+
+      /1TgF0C5AAQAEeAXALngF0C5HwQAcQ39/1QfIAPVHyAD1f/DAJHAA1/W/8MA0eAHAPngB0D5AARA
+      +QAEQPngFwD54AdA+QAEQPkAaEC54CMAueEjQLngAwEqAHgfUwAAAQsAaBtT4gMAKuAHQPkBGEC5
+      oBSAUiF8ABtg0JtSYGOociB8oJsA/GDTAHwSU0AAAAsAfANTAHAdEgAgABEAfAJT4CcAuf8fALkJ
+      AAAU4B+AuQD0ftPhF0D5IAAAix8AALngH0C5AAQAEeAfALnhH0C54CdAuT8AAGur/v9UHyAD1R8g
+      A9X/wwCRwANf1v17vKn9AwCR4A8A+eAPQPkABED54BsA+f8vALk6AAAU4g9A+eEvgLngAwGqAPR+
+      0wAAAYsA8H3TQAAAiwAYQPkfAADxQAEAVOIPQPnhL4C54AMBqgD0ftMAAAGLAPB900AAAIsAGED5
+      wfj/l+IPQPnhL4C54AMBqgD0ftMAAAGLAPB900AAAIsfGAD54g9A+eEvgLngAwGqAPR+0wAAAYsA
+      8H3TQAAAiwAgQPkfAADxQAEAVOIPQPnhL4C54AMBqgD0ftMAAAGLAPB900AAAIsAIED5pvj/l+IP
+      QPnhL4C54AMBqgD0ftMAAAGLAPB900AAAIsfIAD54C9AuQAEABHgLwC54C9AuR8EAHGt+P9U4BtA
+      +QBQQLkfBAAx4AMAVOAbQPkAQAGR4B8A+eAfQPkCCED54B9A+QAMQLnhAwAq4AMCqrwGAJTgH0D5
+      AgBAueAfQPkABEC54QMAKuADAioHCACU4B9A+QIAQLngH0D5AARAueEDACrgAwIqVAcAlOAfQPkA
+      AEC55AkAlOAfQPkBAIASAQAAueAbQPkfAADxAAEAVOAbQPkAKEC5HwAAcY0AAFTgG0D5AChAuUz4
+      /5fgG0D5HwAA8WAAAFTgG0D5Z/j/l+APQPkfBAD5HyAD1f17xKjAA1/W/Xu9qf0DAJHgDwD54RcA
+      ueAXQLkfSABxgAAAVOAXQLkfMABxYQIAVOAPQPkABED5IQCAUgEAALngD0D5AEhAueAvALngL0C5
+      HwAAceAAAFTgL0C5HzQAcYAAAFTgL0C5H0wAcQEEAFQAAIBSJQAAFOAXQLkfVABxgAAAVOAXQLkf
+      fABxwQAAVOAPQPkABED5QQCAUgEAALkUAAAU4BdAuR8oAHHBAABU4A9A+QAEQPlhAIBSAQAAuQwA
+      ABSgAACQAOhH+QMAQPniF0C5AAAA0AHgLJHgAwOqS/j/lwAAgBIIAAAUHyAD1eAPQPkAIAGRAgWA
+      0gEAgFL39/+XAACAUv17w6jAA1/W/Xu5qf0DAJHgDwD5oAAAkAD0R/kBAED54TcA+QEAgNIAAADQ
+      AeAtkeDjAJEiAED5AgAA+SEIQLkBCAC5AAAA0AEgLpHgIwGRIgBA+QIAAPkhCEC5AQgAuUABgFLg
+      WwC5gAGAUuBfALlAAoBS4GMAuaACgFLgZwC54A9A+QAIQPngGwD54BtA+QAEQLkAPAAS4CsAueAP
+      QPkAIEC54C8AueArQLkfDABxrAIAVP8nALkPAAAU4CeAuQD0ftPh4wCRIGhguOEvQLk/AABroQAA
+      VOEvQLngD0D5iP//l1oAABTgJ0C5AAQAEeAnALngJ0C5HwgAcQ3+/1RKAAAU4CtAuR8MAHENAwBU
+      4CtAuR88AHGsAgBU/ycAuQ8AABTgJ4C5APR+0+EjAZEgaGC44S9AuT8AAGuhAABU4S9AueAPQPlu
+      //+XQAAAFOAnQLkABAAR4CcAueAnQLkfCABxDf7/VDAAABTgK0C5HzwAca0FAFTgD0D5AChAuR8A
+      AHHBAgBU4A9A+QBQQLkfAABxTQIAVOAPQPkASEC54C8AueAvQLkfNABxgAAAVOAvQLkfTABx4QAA
+      VOAPQPkABED5IQCAUgEAALkAAIBSHwAAFAAAgBIdAAAU/ycAuQ8AABTgJ4C5APR+0+FjAZEgaGC4
+      4S9AuT8AAGuhAABU4S9AueAPQPk+//+XEAAAFOAnQLkABAAR4CcAueAnQLkfDABxDf7/VKAAAJAA
+      6Ef5AwBA+eIvQLkAAADQAUAtkeADA6qw9/+XAACAEuEDACqgAACQAPRH+eM3QPkCAED5YwAC6wIA
+      gNJAAABUYvf/l+ADASr9e8eowANf1v17u6n9AwCR4A8A+aAAAJAA9Ef5AQBA+eEnAPkBAIDS4A9A
+      +QEYQLngAwEqAHgfUwAAAQvgJwC54A9A+QAEQPngHwD54A9A+QAIQPkACEC54C8AueAPQPkAIEC5
+      4DMAuUEAgFIAAADQAGAukTf3/5fgNwC54DdAuR8AAHGKAQBUoAAAkADoR/kAAED54wMAqmIHgNIh
+      AIDSAAAA0ACgLpFi9/+XgAGAEt8AABTgH0D54TdAuQEoALmgAACwAoAVkSFgjdIhAKjy4DdAuXP3
+      /5cfAABxagAAVIABgBLSAAAUoAAAsAKAFZEhYI3SIQCw8uA3QLlp9/+XHwAAcWoAAFSAAYASyAAA
+      FKAAALACAAmRYWCN0iEAqPLgN0C5X/f/lx8AAHFqAABUgAGAEr4AABSgAACwAgAJkWFgjdIhALDy
+      4DdAuVX3/5cfAABxagAAVIABgBK0AAAU4JMAkeIDAKqBYI3SgQCo8uA3QLlL9/+XHwAAcWoAAFSA
+      AYASqgAAFOCTAJHiAwCqgWCN0oEAsPLgN0C5Qff/lx8AAHFqAABUgAGAEqAAABTgH0D5HwQA+eAf
+      QPkfCAD54B9A+R8MAPngH0D5HxAA+eAfQPkfGAD54B9A+R84ALngH0D5HyQA+eAfQPkBAIASAVAA
+      ueAvQLkDAEgRAAAA0AKgL5GBFoBS4AMDKvwEAJThAwCq4B9A+QEgAPngH0D5ACBA+R8AAPFhAABU
+      gAGAEn8AABTgH0D5ACBA+eEzQLkhHAASAgCAUl/6/5fgD0D5AIAAkeAjAPngI0D5AAhAuQB8QJMA
+      9H7Ttvb/l+EDAKrgI0D5AQgA+eAjQPkACED5HwAA8aEAAFTgD0D5Bv7/lyAAgBJmAAAU4CNA+QMI
+      QPngI0D5AAhAuQB8QJMA9H7T4gMAqgEAgFLgAwOqqfb/l+AjQPkADEC5HwAAcaEAAFTgI0D5AQCB
+      UgECoHIBDAC54CNA+QAQQPkfAADxoQIAVAAggNKT9v+X4QMAquAjQPkBEAD5/ysAuQsAABTgI0D5
+      ARBA+eArgLkgAACL4StAuSEcABIBAAA54CtAuQAEABHgKwC54CtAuR/8A3GN/v9U4CNA+QAMQLkA
+      fBhTARwAEuAjQPkBZAA54CNA+QAMQLkAfBATARwAEuAjQPkBaAA54CNA+QAMQLkAfAgTARwAEuAj
+      QPkBbAA54CNA+QAMQLkBHAAS4CNA+QFwADngH0D5AWhAueADASoAeB9TAAABCwBoG1PiAwAq4A9A
+      +QEYQLmgFIBSIXwAG2DQm1JgY6hyIHygmwD8YNMAfBJTQAAACwB8A1MAcB0SACAAEeADACpU9v+X
+      4QMAquAfQPkBBAD54B9A+QAEQPkfAADxoQAAVOAPQPmk/f+XIACAEgQAABTgD0D5b/3/lwAAgFLh
+      AwAqoAAAkAD0R/njJ0D5AgBA+WMAAusCAIDSQAAAVE32/5fgAwEq/XvFqMADX9b9e7up/QMAkeAP
+      APmgAACQAPRH+QEAQPnhJwD5AQCA0uCjAJECBIDSAQCAUjb2/5fgD0D5AARA+QAEQPngFwD5/xsA
+      +eAPQPkABED5AWhAueADASoAeB9TAAABCwBoG1PiAwAq4A9A+QEYQLmgFIBSIXwAG2DQm1JgY6hy
+      IHygmwD8YNMAfBJTQAAACwB8A1MAcB0SACAAEeA7ALngD0D5AARA+QAoQLnhowCR4gMBqgFgjdIB
+      BKjyY/b/l+AnALngJ0C5HwAAcYwBAFSgAACQAOhH+QAAQPnjAwCqwgKA0iEAgNIAAADQAOAvkTr2
+      /5egAYASAgAAFAAAgFLhAwAqoAAAkAD0R/njJ0D5AgBA+WMAAusCAIDSQAAAVAL2/5fgAwEq/XvF
+      qMADX9b9e7yp/QMAkeAPAPnKAwCU4QMAquAPQPkBCAD54A9A+QAIQPkfAADxYQAAVEAAgBKMAQAU
+      4A9A+QAIQPngFwD5AA6A0t31/5fhAwCq4A9A+QEEAPngD0D5AARA+R8AAPFhAABUIACAEn4BABTg
+      D0D5AARA+QIOgNIBAIBS1/X/l+APQPkABED54BsA+eAPQPnf/f+XHwAAcWoAAFRAAYAScAEAFOAP
+      QPnh+f+X4QMAKuAbQPkBaAC54BtA+QAAQLkfDABxgQAAVOAPQPlt/v+XZAEAFOAbQPkAAEC5HwQA
+      cYAAAFQfCABxQAMAVDAAABTgG0D5AWhAueADASoAeB9TAAABCwBoG1PiAwAq4A9A+QEYQLmgFIBS
+      IXwAG2DQm1JgY6hyIHygmwD8YNMAfBJTQAAACwB8A1MAcB0SAGAAEQF4H1PgG0D5AVwAuRgAABTg
+      G0D5AWhAueADASoAeB9TAAABCwBoG1PiAwAq4A9A+QEYQLmgFIBSIXwAG2DQm1JgY6hyIHygmwD8
+      YNMAfBJTQAAACwB8A1MAcB0SAaAAEeAbQPkBXAC5HyAD1eAbQPkAXEC5APw/EQFMFBLgG0D5AVwA
+      udYGAJThAwAq4BtA+QFQALngG0D5AFBAuR8EADFhAABUAAGAEh4BABTgG0D5BFBAueAbQPkFXEC5
+      4BdA+QEMQLkAAKhSPwAAa2EAAFSAAYBSAgAAFIAAgFLjAwAqAgCCUuEDBSrgAwQqBQQAlOEDACrg
+      G0D5AVQAueAbQPkAVEC5HwAAcWEAAFQgAIASBAEAFOAbQPkCUEC54BtA+QBUQLnhAwAq4AMCKrME
+      AJThAwAq4BtA+QFYALngG0D5AFhAuR8EADFBAQBU4BtA+QJQQLngG0D5AFxAueEDACrgAwIqUQQA
+      lGAAgBLtAAAU4BtA+QBYQLkDdAAS4BtA+QFcQLkAAADQAqAskeADAyppAwCU4QMAquAbQPkBMAD5
+      4BtA+QAwQPkfAADxYQIAVOAbQPkCUEC54BtA+QBUQLnhAwAq4AMCKuQEAJTgG0D5AlBAueAbQPkA
+      XEC54QMAKuADAioxBACU4A9A+Xz8/5eAAIASywAAFOAbQPkfBAD54BtA+R8YAPn/IwC5DAAAFOIP
+      QPnhI4C54AMBqgD0ftMAAAGLAPB900AAAIsfGAD54CNAuQAEABHgIwC54CNAuR8EAHFt/v9U/yMA
+      uV4AABThI4C54AMBqgD0ftMAAAGLAPB90wCAAJHhD0D5IAAAi+AfAPngH0D5AAhAuQB8QJMA9H7T
+      /fT/l+EDAKrgH0D5AQgA+eAfQPkACED5HwAA8aEAAFTgD0D5Tfz/lyAAgBKcAAAU4B9A+QMIQPng
+      H0D5AAhAuQB8QJMA9H7T4gMAqgEAgFLgAwOq8PT/l+AfQPkADEC5HwAAcaEAAFTgH0D5AQCBUgEC
+      oHIBDAC54B9A+QAQQPkfAADxoQIAVAAggNLa9P+X4QMAquAfQPkBEAD5/ycAuQsAABTgH0D5ARBA
+      +eAngLkgAACL4SdAuSEcABIBAAA54CdAuQAEABHgJwC54CdAuR/8A3GN/v9U4B9A+QAMQLkAfBhT
+      ARwAEuAfQPkBZAA54B9A+QAMQLkAfBATARwAEuAfQPkBaAA54B9A+QAMQLkAfAgTARwAEuAfQPkB
+      bAA54B9A+QAMQLkBHAAS4B9A+QFwADngI0C5AAQAEeAjALngI0C5HwQAcS30/1TgG0D5ATBA+eAb
+      QPkBGAD54BtA+QAwQPkBgACR4BtA+QEEAPngG0D5AABAuR8EAHGAAABUHwgAcaAAAFQHAAAU4A9A
+      +YL7/5cEAAAU4A9A+b77/5cfIAPV4BtA+QAYQPkCBIDSAQCAUpj0/5fgG0D5ABhA+eEDAKrgG0D5
+      gvn/l+EDACrgG0D5ATgAueAPQPnF+P+XHwAAcaAAAFTgD0D52/v/l6AAgBIqAAAU4A9A+Sj7/5cf
+      AABx4AAAVOAPQPlA+f+X4A9A+dH7/5fAAIASIAAAFOAbQPkAAEC5HwQAcYAAAFQfCABxgAEAVBgA
+      ABTgD0D5tfn/lx8AAHEgAgBU4A9A+S/5/5fgD0D5wPv/l+AAgBIPAAAU4A9A+U/6/5cfAABxIAEA
+      VOAPQPkl+f+X4A9A+bb7/5dgAYASBQAAFB8gA9UCAAAUHyAD1QAAgFL9e8SowANf1v17van9AwCR
+      4A8A+eAPQPkABED5ABBA+eAXAPngD0D5HAAAlOAPQPkABED5AABAuR8EAHGAAABUHwgAcaAAAFQN
+      AAAU4A9A+Ur5/5cKAAAUHyAD1eAXQPkAAEC5AAALEh8AAHGA//9U4A9A+WH5/5cfIAPV4A9A+fz4
+      /5fgD0D5jfv/lx8gA9X9e8OowANf1v17van9AwCR4A8A+eAPQPkABED5AAhA+eAXAPngD0D5AARA
+      +QAAQLkfDABxoQAAVAAAgFIfAAAUQAGAUmX0/5fgF0D5AABAuQAAABIfAABxwAAAVOAXQPkAAEC5
+      AAAYEh8AAHGg/v9U4BdA+QAAQLkAABgSHwAAcaABAFSAAADwAOhH+QMAQPngF0D5ACBAueIDACoA
+      AACwAUAwkeADA6pc9P+XIAGAEgIAABQAAIBS/XvDqMADX9b9e7ip/QMAkeAPAPmAAADwAPRH+QEA
+      QPnhPwD5AQCA0uAPQPkABED5AARA+eArAPngD0D5AARA+QAAQLngRwC5/zcAuf87ALn/LwC50AAA
+      FOEvgLngAwGqAPR+0wAAAYsA8H3TAIAAkeEPQPkgAACL4DcA+eAvQLngPwC5/0MAueA3QPkAYEA5
+      AAQAEeBLALlgAIBS4IcAOeA3QPkADEC5AAwEEh8AAHFgAABUgACAUuCHADngN0D5AQhAueCHQDkg
+      fAAbAHAdUwEAYh4AkG4eIAhgHgAAeR7gTwC54U9AueA7QLk/AABraQAAVOBPQLngOwC5/ycAuZ0A
+      ABTgN0D5ARBA+eA3QPkCCED54CeAuQD0ftNAAACLAABAueI3QPlCaEA5ACTCGgIcABLgS0C5QHwA
+      GwB8CFPgAwAqIAAAiwAAQDngwwE54DdA+QEQQPngN0D5AghA+eAngLkA9H7TQAAAiwAAQLniN0D5
+      QmxAOQAkwhoCHAAS4EtAuUB8ABsAfAhT4AMAKiAAAIsAAEA54McBOeA3QPkBEED54DdA+QIIQPng
+      J4C5APR+00AAAIsAAEC54jdA+UJwQDkAJMIaAhwAEuBLQLlAfAAbAHwIU+ADACogAACLAABAOeDL
+      ATngN0D5ARBA+eA3QPkCCED54CeAuQD0ftNAAACLAABAueI3QPlCZEA5ACTCGgIcABLgS0C5QHwA
+      GwB8CFPgAwAqIAAAiwAAQDngzwE5/zMAuUgAABT/KwC5QAAAFOBHQLkfDABx4AAAVOBDQLkAHAAS
+      YQCAUiAAAEsAHAASAwAAFOBDQLkAHAAS4I8AOeAzQLnhwwGRIGhgOOEDACqgAACQAiAJkSB8QJPh
+      K4C5Idx400EAAYsgAACLAABAOeCLADngR0C5HwQAcQABAFTgN0D5AARAuR8AAHGAAABU4ItAOeAD
+      ICrgiwA54D9AuQF0HlPgj0A5IAAACwB8QJPhK0D5IAAAi+GLQDkBAAA54ENAuQAEABHgQwC54ENA
+      uR8QAHFhAQBU/0MAueBHQLkfBABxYQAAVEAAgFICAAAUIACAUuE/QLkgAAAL4D8AueArQLkABAAR
+      4CsAueArQLkfCABx7ff/VOAzQLkABAAR4DMAueCHQDnhM0C5PwAAa8P2/1TgJ0C5AAQAEeAnALng
+      N0D5AAhAueEnQLk/AABrC+z/VOAvQLkABAAR4C8AueAvQLkfBABx7eX/VOAPQPnr/v+X4DcAueA3
+      QLkfAABxYAAAVOA3QLksAAAU4A9A+QAAQPkfAADxgAIAVAP3/5fgLwD5oAAAkACgFZEAAED54S9A
+      +SAAAMvgMwD54A9A+QAAQPnhM0D5PwAA6+IAAFTgD0D5AABA+eEDACrgM0D5IAAAS0Lz/5fgR0C5
+      HwwAcYAAAFTgD0D5dPn/lwQAABTgD0D5vfz/l+A3ALnn9v+X4QMAqqAAAJAAoBWRAQAA+eA7QLkA
+      sAQR4QMAKuAPQPkBAAD54DdAueEDACqAAADwAPRH+eM/QPkCAED5YwAC6wIAgNJAAABU8fL/l+AD
+      ASr9e8iowANf1v+DANHgDwC54A9AueADAEvgHwC54B9AuR84AHHMAABUgAAA8ADgFpHhH4C5AHhh
+      +AMAABQAAACwAKAwkf+DAJHAA1/W/Xu9qf0DAJHgDwD54AsA/f8jALk1AAAU4SOAueADAaoA9H7T
+      AAABiwDwfdMAgACR4Q9A+SAAAIvgFwD54BdA+QAQQPkfAADxoAQAVP8nALkgAAAU4AtA/RggYB5M
+      AABUEgAAFOAnQL0A2CFe4G+oUgEAJx4AGCEeAMAiHuELQP2U8v+XAADc0uAN6PIBAGeeAQhhHgAQ
+      bB4gKGAeAAB4HgAcABIDAAAU4CdAuQAcABLhF0D5IhBA+eEngLlBAAGLIAAAOeAnQLkABAAR4CcA
+      ueAnQLkf/ANx7fv/VOAjQLkABAAR4CMAueAjQLkfBABxTfn/VB8gA9UfIAPV/XvDqMADX9b/gwDR
+      4A8AueELALngD4C5Aex804AAAPAAwBiRIAAAi+APAPn/FwC5FAAAFOAPQPkBBED54BeAuQDwfdMg
+      AACLAABAueELQLk/AABrAQEAVOAPQPkBBED54BeAuQDwfdMgAACLAARAuQoAABTgF0C5AAQAEeAX
+      ALngD0D5AABAueEXQLk/AABrK/3/VAAAgBL/gwCRwANf1v+DANHgDwC54QsAueAPQLkfAABxiwAA
+      VOAPQLkfDABxbQAAVAAAgBIiAAAU4A+AuQHsfNOAAADwAEAZkSAAAIvgDwD5/xcAuRQAABTgD0D5
+      AQRA+eAXgLkA8H3TIAAAiwAAQLnhC0C5PwAAawEBAFTgD0D5AQRA+eAXgLkA8H3TIAAAiwAEQLkK
+      AAAU4BdAuQAEABHgFwC54A9A+QAAQLnhF0C5PwAAayv9/1QAAIAS/4MAkcADX9b/gwDR4A8AuQAC
+      gFLgHwC54Q9AueAfQLk/AABrawAAVAAAgFIFAAAUAAAAsADAOJHhD4C5AHhhuP+DAJHAA1/W/0MA
+      0eAPALngD0C5AAjAWv9DAJHAA1/W/Xu8qf0DAJGAAADwAPRH+QEAQPnhHwD5AQCA0v8TAPkAAADQ
+      AWAGkQAAANAAgAaREfL/l+AXAPngF0D5HwAA8WEAAFQAAIDSMgAAFOBTAJHjF0D5ggCA0iEAgNI6
+      8v+X4BsA+eAbQPkfEADxoQQAVOAXQLnd//+X4BcAuf8bALkcAAAUgAAA8AJAGpHhG0C54AMBqgD4
+      f9MAAAGLAPB900AAAIsABEC54B8AueAXQLnhH0C5PwAAa2EBAFThG0C54AMBqgD4f9MAAAGLAPB9
+      04EAAPAhQBqRAAABi+ATAPkJAAAU4BtAuQAEABHgGwC54BtAuR/4AHFp/P9UAgAAFB8gA9XgF0D5
+      z/H/l+ATQPnhAwCqgAAA8AD0R/njH0D5AgBA+WMAAusCAIDSQAAAVOXx/5fgAwGq/XvEqMADX9b9
+      e7yp/QMAkeAfALnhGwC54gsA+djx/5fgAwBL4C8AudXx/5cABABR4DMAuUEAglIBAqBy4AtA+cfx
+      /5fgNwC54DdAuR8AAHHKAABUAAAA0AAgB5GU8f+XAACA0h4AABTmG0C54R9AueAvQLkgAAAK4AMA
+      KuUDAKrkN0C5IwCAUmIAgFLhAwaqAACA0trx/5fgHwD54B9A+R8EALHBAABUAAAA0ACAB5F/8f+X
+      AACA0gkAABTgN0C5t/H/l+EfQLngM0C5IAAACuADACrhH0D5IAAAi/17xKjAA1/W/Xu9qf0DAJHg
+      DwD54RcAuaLx/5fgAwBL4CMAueEjQLngD0D5IAAAiuAXAPngF0D54RdAuc3x/5fgJwC54CdAuR8A
+      AHGAAABUAAAA0ADAB5Fe8f+XAACA0v17w6jAA1/W/Xu9qf0DAJHgHwC54QsA+eAfQLngKwC5AACA
+      EuAvALngK0C5HwAAcWoAAFTQAgCU4CsAueArQLkfAABxqwEAVOILQPkBgIzSAQG48uArQLnG8f+X
+      4C8AueAvQLkfAABxigAAVAAAANAAAAiRP/H/l+AfQLkfAABxagAAVOArQLkBAwCU4C9Auf17w6jA
+      A1/W/Xu1qf0DAJHgHwC54RsAueIXALnjEwC5gAAA8AD0R/kBAED54VcA+QEAgNL/JwC54CdAuQEE
+      ABHhJwC5AHxAkwD0ftPhowCRP2gguOAnQLkBBAAR4ScAuQB8QJMA9H7T4aMAkT9oILjgJ0C5AQQA
+      EeEnALkAfECTAPR+0+GjAJGCAYBSYgCgciJoILjgJ0C5AQQAEeEnALkAfECTAPR+0+GjAJGCAYBS
+      ImgguOAnQLkBBAAR4ScAuQB8QJMA9H7T4aMAkYIBgFIiaCC44CdAuQEEABHhJwC5AHxAkwD0ftPh
+      owCR4htAuSJoILjgJ0C5AQQAEeEnALkAfECTAPR+0+GjAJHiF0C5ImgguOAnQLkBBAAR4ScAuQB8
+      QJMA9H7T4aMAkeITQLkiaCC44CdAuQEEABHhJwC5AHxAkwD0ftPhowCRP2gguOAngLkAdB5T4CsA
+      ueCjAJHhAwCq4B9AuYT//5cfAABxagAAVAAAgFICAAAU4D9AueEDACqAAADwAPRH+eNXQPkCAED5
+      YwAC6wIAgNJAAABUCPH/l+ADASr9e8uowANf1v17tan9AwCR4B8AueEbALmAAADwAPRH+QEAQPnh
+      VwD5AQCA0v8nALngJ0C5AQQAEeEnALkAfECTAPR+0+GjAJE/aCC44CdAuQEEABHhJwC5AHxAkwD0
+      ftPhowCRP2gguOAnQLkBBAAR4ScAuQB8QJMA9H7T4aMAkeIBgFJiAKByImgguOAnQLkBBAAR4ScA
+      uQB8QJMA9H7T4aMAkYIAgFIiaCC44CdAuQEEABHhJwC5AHxAkwD0ftPhowCRggCAUiJoILjgJ0C5
+      AQQAEeEnALkAfECTAPR+0+GjAJHiG0C5ImgguOAnQLkBBAAR4ScAuQB8QJMA9H7T4aMAkT9oILjg
+      J4C5AHQeU+ArALngowCR4QMAquAfQLks//+X4D9AueEDACqAAADwAPRH+eNXQPkCAED5YwAC6wIA
+      gNJAAABUtPD/l+ADASr9e8uowANf1v17tan9AwCR4B8AueEbALmAAADwAPRH+QEAQPnhVwD5AQCA
+      0v8nALngJ0C5AQQAEeEnALkAfECTAPR+0+GjAJE/aCC44CdAuQEEABHhJwC5AHxAkwD0ftPhowCR
+      P2gguOAnQLkBBAAR4ScAuQB8QJMA9H7T4aMAkaIBgFJiAKByImgguOAnQLkBBAAR4ScAuQB8QJMA
+      9H7T4aMAkYIAgFIiaCC44CdAuQEEABHhJwC5AHxAkwD0ftPhowCRggCAUiJoILjgJ0C5AQQAEeEn
+      ALkAfECTAPR+0+GjAJHiG0C5ImgguOAnQLkBBAAR4ScAuQB8QJMA9H7T4aMAkT9oILjgJ4C5AHQe
+      U+ArALngowCR4QMAquAfQLnY/v+XHwAAcWoAAFQAAIASAgAAFOA/QLnhAwAqgAAA0AD0R/njV0D5
+      AgBA+WMAAusCAIDSQAAAVFzw/5fgAwEq/XvLqMADX9b9e7Wp/QMAkeAfALnhGwC5gAAA0AD0R/kB
+      AED54VcA+QEAgNL/JwC54CdAuQEEABHhJwC5AHxAkwD0ftPhowCRP2gguOAnQLkBBAAR4ScAuQB8
+      QJMA9H7T4aMAkT9oILjgJ0C5AQQAEeEnALkAfECTAPR+0+GjAJHCAYBSYgCgciJoILjgJ0C5AQQA
+      EeEnALkAfECTAPR+0+GjAJGCAIBSImgguOAnQLkBBAAR4ScAuQB8QJMA9H7T4aMAkYIAgFIiaCC4
+      4CdAuQEEABHhJwC5AHxAkwD0ftPhowCR4htAuSJoILjgJ0C5AQQAEeEnALkAfECTAPR+0+GjAJE/
+      aCC44CeAuQB0HlPgKwC54KMAkeEDAKrgH0C5gP7/l+A/QLnhAwAqgAAA0AD0R/njV0D5AgBA+WMA
+      AusCAIDSQAAAVAjw/5fgAwEq/XvLqMADX9b9e7Sp/QMAkeAvALnhKwC54icAueMjALnkHwC55RsA
+      ueYXALnnEwC5gAAA0AD0R/kBAED54V8A+QEAgNL/NwC54DdAuQEEABHhNwC5AHxAkwD0ftPh4wCR
+      P2gguOA3QLkBBAAR4TcAuQB8QJMA9H7T4eMAkT9oILjgN0C5AQQAEeE3ALkAfECTAPR+0+HjAJEC
+      AoBSYgCgciJoILjgN0C5AQQAEeE3ALkAfECTAPR+0+HjAJGCA4BSImgguOA3QLkBBAAR4TcAuQB8
+      QJMA9H7T4eMAkYIDgFIiaCC44DdAuQEEABHhNwC5AHxAkwD0ftPh4wCR4itAuSJoILjgN0C5AQQA
+      EeE3ALkAfECTAPR+0+HjAJHiJ0C5ImgguOA3QLkBBAAR4TcAuQB8QJMA9H7T4eMAkeIjQLkiaCC4
+      4DdAuQEEABHhNwC5AHxAkwD0ftPh4wCR4h9AuSJoILjgN0C5AQQAEeE3ALkAfECTAPR+0+HjAJHi
+      G0C5ImgguOA3QLkBBAAR4TcAuQB8QJMA9H7T4eMAkeIXQLkiaCC44DdAuQEEABHhNwC5AHxAkwD0
+      ftPh4wCR4hNAuSJoILjgN0C5AQQAEeE3ALkAfECTAPR+0+HjAJE/aCC44DeAuQB0HlPgOwC54OMA
+      keEDAKrgL0C59v3/l+BPQLnhAwAqgAAA0AD0R/njX0D5AgBA+WMAAusCAIDSQAAAVH7v/5fgAwEq
+      /XvMqMADX9b9e7Wp/QMAkeAfALnhGwC5gAAA0AD0R/kBAED54VcA+QEAgNL/JwC54CdAuQEEABHh
+      JwC5AHxAkwD0ftPhowCRP2gguOAnQLkBBAAR4ScAuQB8QJMA9H7T4aMAkT9oILjgJ0C5AQQAEeEn
+      ALkAfECTAPR+0+GjAJFCAoBSYgCgciJoILjgJ0C5AQQAEeEnALkAfECTAPR+0+GjAJGCAIBSImgg
+      uOAnQLkBBAAR4ScAuQB8QJMA9H7T4aMAkYIAgFIiaCC44CdAuQEEABHhJwC5AHxAkwD0ftPhowCR
+      4htAuSJoILjgJ0C5AQQAEeEnALkAfECTAPR+0+GjAJE/aCC44CeAuQB0HlPgKwC54KMAkeEDAKrg
+      H0C5ov3/l+A/QLnhAwAqgAAA0AD0R/njV0D5AgBA+WMAAusCAIDSQAAAVCrv/5fgAwEq/XvLqMAD
+      X9b9e7Sp/QMAkeAvALnhKwC54icAueMjALnkHwC5gAAA0AD0R/kBAED54V8A+QEAgNL/NwC54DdA
+      uQEEABHhNwC5AHxAkwD0ftPh4wCRP2gguOA3QLkBBAAR4TcAuQB8QJMA9H7T4eMAkT9oILjgN0C5
+      AQQAEeE3ALkAfECTAPR+0+HjAJEiAoBSYgCgciJoILjgN0C5AQQAEeE3ALkAfECTAPR+0+HjAJEC
+      AoBSImgguOA3QLkBBAAR4TcAuQB8QJMA9H7T4eMAkQICgFIiaCC44DdAuQEEABHhNwC5AHxAkwD0
+      ftPh4wCR4itAuSJoILjgN0C5AQQAEeE3ALkAfECTAPR+0+HjAJHiJ0C5ImgguOA3QLkBBAAR4TcA
+      uQB8QJMA9H7T4eMAkeIjQLkiaCC44DdAuQEEABHhNwC5AHxAkwD0ftPh4wCR4h9AuSJoILjgN0C5
+      AQQAEeE3ALkAfECTAPR+0+HjAJE/aCC44DeAuQB0HlPgOwC54OMAkeEDAKrgL0C5M/3/l+BPQLnh
+      AwAqgAAA0AD0R/njX0D5AgBA+WMAAusCAIDSQAAAVLvu/5fgAwEq/XvMqMADX9b9e7qp/QMAkYAA
+      ANAA9Ef5AQBA+eEvAPkBAIDSAQCAUgAAALAAYAiRoe7/l+AXALngF0C5HwAAcWsAAFTgF0C5KgAA
+      FI7u/5fjYwCR4gMAKgAAALABoAiR4AMDqnDu/5fgYwCR3u7/lwEAgFKADIBSd+7/l+EDAKrgYwCR
+      4gMBqgEwhFKm7v+XHwAAccoAAFQAAACwAOAIkVnu/5cAAIASEgAAFOBjAJEBAIBSgO7/l+AXALng
+      F0C5HwAAcQoBAFQAAACwAIAJkU3u/5fgYwCRw+7/lwAAgBIEAAAU4GMAkb/u/5fgF0C54QMAKoAA
+      ANAA9Ef54y9A+QIAQPljAALrAgCA0kAAAFR17v+X4AMBKv17xqjAA1/W/Xu+qf0DAJHgHwC54B9A
+      uXHu/5cfIAPV/XvCqMADX9YfIAPV/Xu/qf0DAJH9e8GowANf1gEAAgAAAAAAY2Q6ZzpoaXM6dng6
+      eToAACVzIHZlcnNpb24gJXMKAABVc2FnZTogJXMgCi1oICgtLWhlbHApICAgIC0gdGhpcyBpbmZv
+      cm1hdGlvbgotcyAoLS1zdHJpcCkgICAtIHN0cmlwIHR5cGUgLSByZ2IsIGdyYiwgZ2JyLCByZ2J3
+      Ci14ICgtLXdpZHRoKSAgIC0gbWF0cml4IHdpZHRoIChkZWZhdWx0IDgpCi15ICgtLWhlaWdodCkg
+      IC0gbWF0cml4IGhlaWdodCAoZGVmYXVsdCA4KQotZCAoLS1kbWEpICAgICAtIGRtYSBjaGFubmVs
+      IHRvIHVzZSAoZGVmYXVsdCAxMCkKLWcgKC0tZ3BpbykgICAgLSBHUElPIHRvIHVzZQogICAgICAg
+      ICAgICAgICAgIElmIG9taXR0ZWQsIGRlZmF1bHQgaXMgMTggKFBXTTApCi1pICgtLWludmVydCkg
+      IC0gaW52ZXJ0IHBpbiBvdXRwdXQgKHB1bHNlIExPVykKLWMgKC0tY2xlYXIpICAgLSBjbGVhciBt
+      YXRyaXggb24gZXhpdC4KLXYgKC0tdmVyc2lvbikgLSB2ZXJzaW9uIGluZm9ybWF0aW9uCgBpbnZh
+      bGlkIGRtYSAlZAoAaW52YWxpZCBoZWlnaHQgJWQKAAAAAAAAaW52YWxpZCB3aWR0aCAlZAoAAAAA
+      AAAAcmdiAAAAAAByYmcAAAAAAGdyYgAAAAAAZ2JyAAAAAABicmcAAAAAAGJncgAAAAAAcmdidwAA
+      AABncmJ3AAAAAGludmFsaWQgc3RyaXAgJXMKAAAAAAAAACVkLiVkLiVkAAAAAAAAAAB3czI4MTFf
+      aW5pdCBmYWlsZWQ6ICVzCgB3czI4MTFfcmVuZGVyIGZhaWxlZDogJXMKAAAAAAAAAGhlbHAAAAAA
+      ZG1hAAAAAABncGlvAAAAAGludmVydAAAY2xlYXIAAABzdHJpcAAAAGhlaWdodAAAd2lkdGgAAAB2
+      ZXJzaW9uAAQFBgcDAgAAL2Rldi9tZW0AAAAAAAAAAGdwaW9udW0gJWQgbm90IGFsbG93ZWQKAEdw
+      aW8gJWQgaXMgaWxsZWdhbCBmb3IgTEVEIGNoYW5uZWwgMAoAAAAKAAAAEgAAABUAAAAAAAAACgAA
+      ABIAAAAfAAAAAAAAAC9kZXYvc3BpZGV2MC4wAABDYW5ub3Qgb3BlbiAvZGV2L3NwaWRldjAuMC4g
+      c3BpX2JjbTI4MzUgbW9kdWxlIG5vdCBsb2FkZWQ/CgAAAAAAL2Rldi9ncGlvbWVtAAAAAENhbid0
+      IHNlbmQgc3BpIG1lc3NhZ2UAAERNQSBFcnJvcjogJTA4eAoAAAAAAAAAAAAAAAAAAAAAU3VjY2Vz
+      cwBHZW5lcmljIGZhaWx1cmUAT3V0IG9mIG1lbW9yeQAAAEhhcmR3YXJlIHJldmlzaW9uIGlzIG5v
+      dCBzdXBwb3J0ZWQAAAAAAABNZW1vcnkgbG9jayBmYWlsZWQAAAAAAABtbWFwKCkgZmFpbGVkAAAA
+      VW5hYmxlIHRvIG1hcCByZWdpc3RlcnMgaW50byB1c2Vyc3BhY2UAAFVuYWJsZSB0byBpbml0aWFs
+      aXplIEdQSU8AAAAAAAAAVW5hYmxlIHRvIGluaXRpYWxpemUgUFdNAAAAAAAAAABGYWlsZWQgdG8g
+      Y3JlYXRlIG1haWxib3ggZGV2aWNlAERNQSBlcnJvcgAAAAAAAABTZWxlY3RlZCBHUElPIG5vdCBw
+      b3NzaWJsZQAAAAAAAFVuYWJsZSB0byBpbml0aWFsaXplIFBDTQAAAAAAAAAAVW5hYmxlIHRvIGlu
+      aXRpYWxpemUgU1BJAAAAAAAAAABTUEkgdHJhbnNmZXIgZXJyb3IAAAAAAAAMAAAAAAAAABIAAAAF
+      AAAAKAAAAAAAAAANAAAAAAAAABMAAAAFAAAAKQAAAAAAAAAtAAAAAAAAABIAAAAAAAAAHAAAAAIA
+      AAATAAAAAAAAAB0AAAACAAAAFAAAAAAAAAAeAAAAAgAAABUAAAAAAAAAHwAAAAIAAAAAcAAAAHEA
+      AAByAAAAcwAAAHQAAAB1AAAAdgAAAHcAAAB4AAAAeQAAAHoAAAB7AAAAfAAAAH0AAAB+AAAAUOAA
+      UGkgNDAwIC0gNEdCIHYxLjAAAAAAAAAAUGkgNDAwIC0gNEdCIHYxLjEAAAAAAAAAUGkgNCBNb2Rl
+      bCBCIC0gMUdCIHYxLjEAUGkgNCBNb2RlbCBCIC0gMkdCIHYuMS4xAAAAAAAAAABQaSA0IE1vZGVs
+      IEIgLSA0R0IgdjEuMQBQaSA0IE1vZGVsIEIgLSAxR0IgdjEuMgBQaSA0IE1vZGVsIEIgLSAyR0Ig
+      di4xLjIAAAAAAAAAAFBpIDQgTW9kZWwgQiAtIDRHQiB2MS4yAFBpIDQgTW9kZWwgQiAtIDJHQiB2
+      MS40AFBpIDQgTW9kZWwgQiAtIDhHQiB2MS40AFBpIDQgTW9kZWwgQiAtIDRHQiB2MS40AFBpIDQg
+      TW9kZWwgQiAtIDFHQiB2MS41AFBpIDQgTW9kZWwgQiAtIDJHQiB2MS41AFBpIDQgTW9kZWwgQiAt
+      IDRHQiB2MS41AFBpIDQgTW9kZWwgQiAtIDhHQiB2MS41AENvbXB1dGUgTW9kdWxlIDQgdjEuMCBl
+      TU1DAAAAAAAAQ29tcHV0ZSBNb2R1bGUgNCB2MS4wIExpdGUAAAAAAABDb21wdXRlIE1vZHVsZSA0
+      IHYxLjAgV2lGaQAAAAAAAENvbXB1dGUgTW9kdWxlIDQgdjEuMCBXaUZpIDhHQgAAQ29tcHV0ZSBN
+      b2R1bGUgNCBSZXYgMS4xAAAAAAAAAABNb2RlbCBCAE1vZGVsIEEATW9kZWwgQisAAAAAAAAAAENv
+      bXB1dGUgTW9kdWxlIDEAAAAAAAAAAENvbXB1dGUgTW9kdWxlIDMvTDMAAAAAAENvbXB1dGUgTW9k
+      dWxlIDMrAAAAAAAAAENvbXB1dGUgTW9kdWxlIDMgUmV2IDEuMAAAAAAAAAAAUGkgWmVybyB2MS4y
+      AAAAAFBpIFplcm8gdjEuMwAAAABQaSBaZXJvIFcgdjEuMQAAUGkgWmVybyAyIFcgdjEuMAAAAAAA
+      AAAATW9kZWwgQSsAAAAAAAAAAFBpIDIAAAAAUGkgMyBCKwBQaSAzIEIAAFBpIDMAAAAATW9kZWwg
+      MyBBKwAAAAAAAHIAAAAAAAAAL3Byb2MvZGV2aWNlLXRyZWUvc3lzdGVtL2xpbnV4LHJldmlzaW9u
+      AENhbid0IG9wZW4gL2Rldi9tZW0AAAAAAG1tYXAgZXJyb3IKAAAAAABtdW5tYXAgZXJyb3IKAAAA
+      aW9jdGxfc2V0X21zZyBmYWlsZWQKAAAAL2Rldi92Y2lvAAAAAAAAAC90bXAvbWFpbGJveC0lZABG
+      YWlsZWQgdG8gY3JlYXRlIG1haWxib3ggZGV2aWNlCgAAAAAAAAAAQ2FuJ3Qgb3BlbiBkZXZpY2Ug
+      ZmlsZQoAARsDO8QBAAA3AAAAiLD//9wBAADYsP//8AEAAAix//8EAgAASLH//xgCAACYsf//PAIA
+      AJyx//9QAgAAeLL//2gCAABws///gAIAACC0//+YAgAApLT//7ACAADEtP//yAIAAGS1///oAgAA
+      0Lv//wgDAAB8vf//MAMAAMS+//9QAwAAbL///3ADAAD0v///iAMAABDC//+oAwAA1ML//8gDAAAY
+      w///4AMAAJjD//8ABAAAGMT//yAEAACoxv//QAQAAOTI//9gBAAAoMn//4AEAACcyv//oAQAAJjL
+      //+4BAAAXMz//9AEAABEzv//8AQAAEzP//8QBQAAwNH//zAFAAAU1v//UAUAAEDX//9wBQAAqN3/
+      /5AFAAA43v//sAUAAPDe///QBQAAhOP///AFAADI4///CAYAAMzk//8oBgAAZOX//0AGAAAc5v//
+      WAYAAFzm//9wBgAAdOb//4gGAAC05///qAYAAJDo///IBgAA8Oj//+gGAACA6f//CAcAACjr//8o
+      BwAAeOz//0gHAADY7f//aAcAACjv//+IBwAAUPH//6gHAACg8v//yAcAAFz0///oBwAAdPX//wgI
+      AAAAAAAAEAAAAAAAAAABelIABHgeARsMHwAQAAAAGAAAAKSu//80AAAAAEEHHhAAAAAsAAAA4K7/
+      /zAAAAAAAAAAEAAAAEAAAAD8rv//PAAAAAAAAAAgAAAAVAAAACiv//9IAAAAAEEOIJ0EngNCkwJO
+      3t3TDgAAAAAQAAAAeAAAAFSv//8EAAAAAAAAABQAAACMAAAARK///9wAAAAAQQ4QdQ4AABQAAACk
+      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
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAABAkAAAAAAAAwCMAAAAAAAAwbAAAAAAAADhsAAAAAAAASGwAAAAAAABY
+      bAAAAAAAAIBsAAAAAAAAmGwAAAAAAACobAAAAAAAANBsAAAAAAAA8GwAAAAAAAAQbQAAAAAAADBt
+      AAAAAAAAQG0AAAAAAABgbQAAAAAAAIBtAAAAAAAAoG0AAAAAAAADAAAAAAAAALhtAAAAAAAABAAA
+      AAAAAADQbQAAAAAAAAIAAAAAAAAA8G0AAAAAAAACAAAAAAAAAABuAAAAAAAAAgAAAAAAAAAQbgAA
+      AAAAAAIAAAAAAAAAIG4AAAAAAAADAAAAMDHAAAAAAP4AAADAcG4AAAAAAAADAAAAMTHAAAAAAP4A
+      AADAiG4AAAAAAAADAAAAETGgAAAAAP4AAADAoG4AAAAAAAADAAAAETGwAAAAAP4AAADAuG4AAAAA
+      AAADAAAAETHAAAAAAP4AAADA2G4AAAAAAAADAAAAEjGgAAAAAP4AAADA8G4AAAAAAAADAAAAEjGw
+      AAAAAP4AAADACG8AAAAAAAADAAAAEjHAAAAAAP4AAADAKG8AAAAAAAADAAAAFDGwAAAAAP4AAADA
+      QG8AAAAAAAADAAAAFDHQAAAAAP4AAADAWG8AAAAAAAADAAAAFDHAAAAAAP4AAADAcG8AAAAAAAAD
+      AAAAFTGgAAAAAP4AAADAiG8AAAAAAAADAAAAFTGwAAAAAP4AAADAoG8AAAAAAAADAAAAFTHAAAAA
+      AP4AAADAuG8AAAAAAAADAAAAFTHQAAAAAP4AAADA0G8AAAAAAAADAAAAQDGgAAAAAP4AAADA6G8A
+      AAAAAAADAAAAQDGwAAAAAP4AAADACHAAAAAAAAADAAAAQDHAAAAAAP4AAADAKHAAAAAAAAADAAAA
+      QDHQAAAAAP4AAADASHAAAAAAAAADAAAAQTGgAAAAAP4AAADAaHAAAAAAAAADAAAAQTGwAAAAAP4A
+      AADAaHAAAAAAAAADAAAAQTHAAAAAAP4AAADAaHAAAAAAAAADAAAAQTHQAAAAAP4AAADAaHAAAAAA
+      AAABAAAAAgAAAAAAACAAAABAiHAAAAAAAAABAAAAAwAAAAAAACAAAABAiHAAAAAAAAABAAAABAAA
+      AAAAACAAAABAiHAAAAAAAAABAAAABQAAAAAAACAAAABAiHAAAAAAAAABAAAABgAAAAAAACAAAABA
+      iHAAAAAAAAABAAAABwAAAAAAACAAAABAkHAAAAAAAAABAAAACAAAAAAAACAAAABAkHAAAAAAAAAB
+      AAAACQAAAAAAACAAAABAkHAAAAAAAAABAAAADQAAAAAAACAAAABAiHAAAAAAAAABAAAADgAAAAAA
+      ACAAAABAiHAAAAAAAAABAAAADwAAAAAAACAAAABAiHAAAAAAAAABAAAAEAAAAAAAACAAAABAmHAA
+      AAAAAAABAAAAEwAAAAAAACAAAABAmHAAAAAAAAABAAAAMgCQAAAAACAAAABAmHAAAAAAAAABAAAA
+      EQAAAAAAACAAAABAqHAAAAAAAAABAAAAFAAAAAAAACAAAABAqHAAAAAAAAACAAAAoCCgAAAAAD8A
+      AADAwHAAAAAAAAACAAAAACGgAAAAAD8AAADA2HAAAAAAAAACAAAAoCCiAAAAAD8AAADA8HAAAAAA
+      AAABAAAAkgCQAAAAACAAAABAEHEAAAAAAAABAAAAkwCQAAAAACAAAABAIHEAAAAAAAABAAAAkwCS
+      AAAAACAAAABAIHEAAAAAAAABAAAAwQCSAAAAACAAAABAMHEAAAAAAAABAAAAwQCQAAAAACAAAABA
+      MHEAAAAAAAACAAAAICGQAAAAAD8AAADAQHEAAAAAAAABAAAAEgAAAAAAACAAAABAWHEAAAAAAAAB
+      AAAAFQAAAAAAACAAAABAWHEAAAAAAAABAAAAIQCQAAAAACAAAABAWHEAAAAAAAACAAAAQRCgAAAA
+      AD8AAADAaHEAAAAAAAACAAAAQBCgAAAAAD8AAADAaHEAAAAAAAACAAAAQRCiAAAAAD8AAADAaHEA
+      AAAAAAACAAAAQiCiAAAAAD8AAADAaHEAAAAAAAACAAAA1CCgAAAAAD8AAADAcHEAAAAAAAACAAAA
+      0yCgAAAAAD8AAADAcHEAAAAAAAACAAAAgiCjAAAAAD8AAADAeHEAAAAAAAACAAAAgiCgAAAAAD8A
+      AADAgHEAAAAAAAACAAAAgyCgAAAAAD8AAADAgHEAAAAAAAACAAAAgiCiAAAAAD8AAADAgHEAAAAA
+      AAACAAAAgyCiAAAAAD8AAADAgHEAAAAAAAACAAAA4CCQAAAAAD8AAADAiHEAAAAAAAABAAAAAAAA
+      AGcBAAAAAAAAAQAAAAAAAABxAQAAAAAAAAEAAAAAAAAAewEAAAAAAAAMAAAAAAAAAHggAAAAAAAA
+      DQAAAAAAAAAMaAAAAAAAABkAAAAAAAAAqIUBAAAAAAAbAAAAAAAAAAgAAAAAAAAAGgAAAAAAAACw
+      hQEAAAAAABwAAAAAAAAACAAAAAAAAAD1/v9vAAAAAJgCAAAAAAAABQAAAAAAAADgDQAAAAAAAAYA
+      AAAAAAAAaAQAAAAAAAAKAAAAAAAAAEYEAAAAAAAACwAAAAAAAAAYAAAAAAAAABUAAAAAAAAAAAAA
+      AAAAAAADAAAAAAAAAIiOAQAAAAAAAgAAAAAAAABIAwAAAAAAABQAAAAAAAAABwAAAAAAAAAXAAAA
+      AAAAADAdAAAAAAAABwAAAAAAAABwEwAAAAAAAAgAAAAAAAAAwAkAAAAAAAAJAAAAAAAAABgAAAAA
+      AAAAHgAAAAAAAAAIAAAAAAAAAPv//28AAAAAAQAACAAAAAD+//9vAAAAAPASAAAAAAAA////bwAA
+      AAADAAAAAAAAAPD//28AAAAAJhIAAAAAAAD5//9vAAAAAGEAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACQIAAAAAAAAJAgAAAAAAAAkCAAAAAAAACQ
+      IAAAAAAAAJAgAAAAAAAAkCAAAAAAAACQIAAAAAAAAJAgAAAAAAAAkCAAAAAAAACQIAAAAAAAAJAg
+      AAAAAAAAkCAAAAAAAACQIAAAAAAAAJAgAAAAAAAAkCAAAAAAAACQIAAAAAAAAJAgAAAAAAAAkCAA
+      AAAAAACQIAAAAAAAAJAgAAAAAAAAkCAAAAAAAACQIAAAAAAAAJAgAAAAAAAAkCAAAAAAAACQIAAA
+      AAAAAJAgAAAAAAAAkCAAAAAAAACQIAAAAAAAAJAgAAAAAAAAkCAAAAAAAACQIAAAAAAAAJAgAAAA
+      AAAAkCAAAAAAAACQIAAAAAAAAJAgAAAAAAAAeIwBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABILgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIkAEAAAAA
+      AFhYLllZLlpaAAAAAAgAAAABAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1DAAKAAAA
+      EgAAAAAAAAAIAAAAEAAIAAAAAAAAAAAANwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAIAAAECAAACAgAAAgAAAgIAAAIAAAABAA
+      EAAQACAAAAAgAAAAIBAAIAAAACAAECAAAAAgAAAQEBAQABAQEBAAAAAAAQAAAAIAAAADAAAABAAA
+      AAUAAAAGAAAABwAAANhqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGgAAAAAAAAA4GoAAAAAAAABAAAA
+      AAAAAAAAAAAAAAAAZAAAAAAAAADoagAAAAAAAAEAAAAAAAAAAAAAAAAAAABnAAAAAAAAAPBqAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAGkAAAAAAAAA+GoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYwAAAAAA
+      AAAAawAAAAAAAAEAAAAAAAAAAAAAAAAAAABzAAAAAAAAAAhrAAAAAAAAAQAAAAAAAAAAAAAAAAAA
+      AHkAAAAAAAAAEGsAAAAAAAABAAAAAAAAAAAAAAAAAAAAeAAAAAAAAAAYawAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAB2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAACS
+      kpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpOTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OT
+      k5OTk5OTmpqampqampqampqampqampqampqampqampqampqampqbm5ubm5ubm5ubm5ubm5ubm5ub
+      m5ubm5ubm5ubm5ubm9LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS09PT09PT09PT09PT
+      09PT09PT09PT09PT09PT09PT09Pa2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tvb29vb
+      29vb29vb29vb29vb29vb29vb29vb29vb29vbSUlJSUlJSUlNTU1NTU1NTWlpaWlpaWlpbW1tbW1t
+      bW1JSUlJSUlJSU1NTU1NTU1NaWlpaWlpaWltbW1tbW1tbUlJSUlJSUlJTU1NTU1NTU1paWlpaWlp
+      aW1tbW1tbW1tSUlJSUlJSUlNTU1NTU1NTWlpaWlpaWlpbW1tbW1tbW1JSUlJSUlJSU1NTU1NTU1N
+      aWlpaWlpaWltbW1tbW1tbUlJSUlJSUlJTU1NTU1NTU1paWlpaWlpaW1tbW1tbW1tSUlJSUlJSUlN
+      TU1NTU1NTWlpaWlpaWlpbW1tbW1tbW1JSUlJSUlJSU1NTU1NTU1NaWlpaWlpaWltbW1tbW1tbSQm
+      NDakprS2JCY0NqSmtLYkJjQ2pKa0tiQmNDakprS2JCY0NqSmtLYkJjQ2pKa0tiQmNDakprS2JCY0
+      NqSmtLYkJjQ2pKa0tiQmNDakprS2JCY0NqSmtLYkJjQ2pKa0tiQmNDakprS2JCY0NqSmtLYkJjQ2
+      pKa0tiQmNDakprS2JCY0NqSmtLYkJjQ2pKa0tiQmNDakprS2JCY0NqSmtLYkJjQ2pKa0tiQmNDak
+      prS2JCY0NqSmtLYkJjQ2pKa0tiQmNDakprS2JCY0NqSmtLYkJjQ2pKa0tiQmNDakprS2JCY0NqSm
+      tLYkJjQ2pKa0tiQmNDakprS2JCY0NqSmtLZHQ0M6IChVYnVudHUgMTEuMy4wLTF1YnVudHUxfjIy
+      LjA0LjEpIDExLjMuMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwABADgCAAAAAAAA
+      AAAAAAAAAAAAAAAAAwACAFQCAAAAAAAAAAAAAAAAAAAAAAAAAwADAHgCAAAAAAAAAAAAAAAAAAAA
+      AAAAAwAEAJgCAAAAAAAAAAAAAAAAAAAAAAAAAwAFAGgEAAAAAAAAAAAAAAAAAAAAAAAAAwAGAOAN
+      AAAAAAAAAAAAAAAAAAAAAAAAAwAHACYSAAAAAAAAAAAAAAAAAAAAAAAAAwAIAPASAAAAAAAAAAAA
+      AAAAAAAAAAAAAwAJAHATAAAAAAAAAAAAAAAAAAAAAAAAAwAKADAdAAAAAAAAAAAAAAAAAAAAAAAA
+      AwALAHggAAAAAAAAAAAAAAAAAAAAAAAAAwAMAJAgAAAAAAAAAAAAAAAAAAAAAAAAAwANAAAjAAAA
+      AAAAAAAAAAAAAAAAAAAAAwAOAAxoAAAAAAAAAAAAAAAAAAAAAAAAAwAPACBoAAAAAAAAAAAAAAAA
+      AAAAAAAAAwAQAHhyAAAAAAAAAAAAAAAAAAAAAAAAAwARAEB0AAAAAAAAAAAAAAAAAAAAAAAAAwAS
+      AKiFAQAAAAAAAAAAAAAAAAAAAAAAAwATALCFAQAAAAAAAAAAAAAAAAAAAAAAAwAUALiFAQAAAAAA
+      AAAAAAAAAAAAAAAAAwAVAHiMAQAAAAAAAAAAAAAAAAAAAAAAAwAWAIiOAQAAAAAAAAAAAAAAAAAA
+      AAAAAwAXAACQAQAAAAAAAAAAAAAAAAAAAAAAAwAYAEiVAQAAAAAAAAAAAAAAAAAAAAAAAwAZAAAA
+      AAAAAAAAAAAAAAAAAAABAAAABADx/wAAAAAAAAAAAAAAAAAAAAAJAAAAAAADAHgCAAAAAAAAAAAA
+      AAAAAAAMAAAAAQADAHgCAAAAAAAAIAAAAAAAAAAWAAAAAAANAAAjAAAAAAAAAAAAAAAAAAAJAAAA
+      AAARAFR0AAAAAAAAAAAAAAAAAAAJAAAAAAAPACBoAAAAAAAAAAAAAAAAAAAZAAAABADx/wAAAAAA
+      AAAAAAAAAAAAAAAWAAAAAAANADQjAAAAAAAAAAAAAAAAAAAgAAAAAgANADQjAAAAAAAAFAAAAAAA
+      AAAWAAAAAAALAHggAAAAAAAAAAAAAAAAAAAWAAAAAAAOAAxoAAAAAAAAAAAAAAAAAAAtAAAABADx
+      /wAAAAAAAAAAAAAAAAAAAAAWAAAAAAALAIggAAAAAAAAAAAAAAAAAAAWAAAAAAAOABhoAAAAAAAA
+      AAAAAAAAAAA0AAAABADx/wAAAAAAAAAAAAAAAAAAAAAWAAAAAAANAFAjAAAAAAAAAAAAAAAAAAA/
+      AAAAAgANAFAjAAAAAAAAAAAAAAAAAABBAAAAAgANAIAjAAAAAAAAAAAAAAAAAAAJAAAAAAAXAAiQ
+      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
+      AHCVAQAAAAAAAAAAAAAAAADxAwAAEAAXAEiVAQAAAAAAAAAAAAAAAAD4AwAAEgAAAAAAAAAAAAAA
+      AAAAAAAAAAAHBAAAEQAAAAAAAAAAAAAAAAAAAAAAAAAZBAAAEgANAGhRAAAAAAAAlAQAAAAAAAAn
+      BAAAEgAAAAAAAAAAAAAAAAAAAAAAAABCBAAAEgANANQ+AAAAAAAA6AEAAAAAAABRBAAAEAAYAHCV
+      AQAAAAAAAAAAAAAAAABdBAAAEgANABA+AAAAAAAAxAAAAAAAAABqBAAAEgAAAAAAAAAAAAAAAAAA
+      AAAAAAB8BAAAEgAAAAAAAAAAAAAAAAAAAAAAAACMBAAAEgAAAAAAAAAAAAAAAAAAAAAAAACeBAAA
+      EgAAAAAAAAAAAAAAAAAAAAAAAACvBAAAEgANAPBeAAAAAAAAYAEAAAAAAAC4BAAAEgAAAAAAAAAA
+      AAAAAAAAAAAAAACfBAAAEgAAAAAAAAAAAAAAAAAAAAAAAABbAwAAEgANACxaAAAAAAAA3AAAAAAA
+      AADKBAAAEQAXAByQAQAAAAAABAAAAAAAAADQBAAAEQAPAPBtAAAAAAAAEAAAAAAAAADcBAAAEgAN
+      ANwnAAAAAAAAbAYAAAAAAADmBAAAEgAAAAAAAAAAAAAAAAAAAAAAAAD4BAAAEQAXAMCQAQAAAAAA
+      IAAAAAAAAABJAQAAEQAXACSQAQAAAAAABAAAAAAAAAAHBQAAEQAPANBtAAAAAAAAIAAAAAAAAAAV
+      BQAAEgANAPAkAAAAAAAA+AAAAAAAAAAiBQAAEgAAAAAAAAAAAAAAAAAAAAAAAAA5BQAAEAAXAACQ
+      AQAAAAAAAAAAAAAAAABGBQAAEQAUADCGAQAAAAAAIAAAAAAAAABVBQAAEgAAAAAAAAAAAAAAAAAA
+      AAAAAABxBQAAEgANAOxYAAAAAAAAQAEAAAAAAABrBAAAEgAAAAAAAAAAAAAAAAAAAAAAAAB/BQAA
+      EgAAAAAAAAAAAAAAAAAAAAAAAACUBQAAEgANANxXAAAAAAAAuAAAAAAAAACgBQAAEgANAEBWAAAA
+      AAAABAEAAAAAAAC/BQAAIAAAAAAAAAAAAAAAAAAAAAAAAADOBQAAEQAAAAAAAAAAAAAAAAAAAAAA
+      AADrBQAAEgAAAAAAAAAAAAAAAAAAAAAAAAD8BQAAEgAAAAAAAAAAAAAAAAAAAAAAAAANBgAAEQAP
+      ACBoAAAAAAAABAAAAAAAAAAcBgAAEgANALBQAAAAAAAAuAAAAAAAAAAoBgAAEQAYAFiVAQAAAAAA
+      CAAAAAAAAAAvBgAAEgANAOxnAAAAAAAAIAAAAAAAAAA6BgAAEQAPACBuAAAAAAAAEAAAAAAAAABH
+      BgAAEgAAAAAAAAAAAAAAAAAAAAAAAABeBgAAEQAXAKCQAQAAAAAAIAAAAAAAAABoBgAAEgAAAAAA
+      AAAAAAAAAAAAAAAAAAB4BgAAEgANABhlAAAAAAAAvAEAAAAAAACEBgAAEgAAAAAAAAAAAAAAAAAA
+      AAAAAACVBgAAEQAYAFCVAQAAAAAABAAAAAAAAACjBgAAEAAYAHCVAQAAAAAAAAAAAAAAAACoBgAA
+      EgAAAAAAAAAAAAAAAAAAAAAAAAC4BgAAEQAUAFCGAQAAAAAAQAAAAAAAAACYAQAAEgANAAAjAAAA
+      AAAANAAAAAAAAADHBgAAEgAAAAAAAAAAAAAAAAAAAAAAAADeBgAAEAAYAHCVAQAAAAAAAAAAAAAA
+      AADmBgAAEQAPABBuAAAAAAAAEAAAAAAAAADyBgAAEAAYAEiVAQAAAAAAAAAAAAAAAAD+BgAAEgAN
+      ANRmAAAAAAAAGAEAAAAAAAAIBwAAEgANAEguAAAAAAAArAEAAAAAAAANBwAAEgANALhJAAAAAAAA
+      aAYAAAAAAAAZBwAAEgAAAAAAAAAAAAAAAAAAAAAAAAArBwAAEgANACBQAAAAAAAAkAAAAAAAAAA3
+      BwAAEgAAAAAAAAAAAAAAAAAAAAAAAABJBwAAEgANAPhbAAAAAAAAqAEAAAAAAABTBwAAEQAXACCQ
+      AQAAAAAABAAAAAAAAABaBwAAEgAAAAAAAAAAAAAAAAAAAAAAAABsBwAAEgANAPxVAAAAAAAARAAA
+      AAAAAACEBwAAEgANAMhjAAAAAAAAUAEAAAAAAACPBwAAEgANAERXAAAAAAAAmAAAAAAAAACbBwAA
+      IAAAAAAAAAAAAAAAAAAAAAAAAAARCAAAEgAAAAAAAAAAAAAAAAAAAAAAAAC1BwAAEQAPALhtAAAA
+      AAAAGAAAAAAAAADDBwAAEgANABQ9AAAAAAAA/AAAAAAAAADQBwAAEgANAJRYAAAAAAAAQAAAAAAA
+      AADhBwAAEgAAAAAAAAAAAAAAAAAAAAAAAAD0BwAAEQAXACiQAQAAAAAAcAAAAAAAAAD+BwAAEgAA
+      AAAAAAAAAAAAAAAAAAAAAAAQCAAAEgAAAAAAAAAAAAAAAAAAAAAAAAAjCAAAEgANAOglAAAAAAAA
+      sAAAAAAAAAAwCAAAEgAAAAAAAAAAAAAAAAAAAAAAAAAAU2NydDEubwAkZABfX2FiaV90YWcAJHgA
+      Y3J0aS5vAGNhbGxfd2Vha19mbgBjcnRuLm8AY3J0c3R1ZmYuYwBkZXJlZ2lzdGVyX3RtX2Nsb25l
+      cwBfX2RvX2dsb2JhbF9kdG9yc19hdXgAY29tcGxldGVkLjAAX19kb19nbG9iYWxfZHRvcnNfYXV4
+      X2ZpbmlfYXJyYXlfZW50cnkAZnJhbWVfZHVtbXkAX19mcmFtZV9kdW1teV9pbml0X2FycmF5X2Vu
+      dHJ5AG1haW4uYwBWRVJTSU9OAHJ1bm5pbmcAY3RybF9jX2hhbmRsZXIAc2V0dXBfaGFuZGxlcnMA
+      bG9uZ29wdHMuMAB3czI4MTEuYwBncGlvX2Z1bmN0aW9uX3NldABnZXRfbWljcm9zZWNvbmRfdGlt
+      ZXN0YW1wAG1heF9jaGFubmVsX2xlZF9jb3VudAB1bm1hcF9yZWdpc3RlcnMAYWRkcl90b19idXMA
+      c3RvcF9wd20Ac3RvcF9wY20Ac2V0dXBfcHdtAHNldHVwX3BjbQBkbWFfc3RhcnQAZ3Bpb19pbml0
+      AHNldF9kcml2ZXJfbW9kZQBjaGVja19od3Zlcl9hbmRfZ3Bpb251bQBzcGlfaW5pdABtb2RlLjQA
+      Yml0cy4zAHNwaV90cmFuc2ZlcgBjb252ZXJ0X3RhYmxlLjIAcHJldmlvdXNfdGltZXN0YW1wLjEA
+      cmV0X3N0YXRlX3N0ci4wAHB3bS5jAHBjbS5jAGRtYS5jAGRtYV9vZmZzZXQAcnBpaHcuYwBfX2Jz
+      d2FwXzMyAHJwaV9od19pbmZvAG1haWxib3guYwBtYm94X3Byb3BlcnR5AF9fRlJBTUVfRU5EX18A
+      X19kc29faGFuZGxlAF9EWU5BTUlDAF9fR05VX0VIX0ZSQU1FX0hEUgBfX1RNQ19FTkRfXwBfR0xP
+      QkFMX09GRlNFVF9UQUJMRV8AbWVtX3VubG9jawBleGl0QEdMSUJDXzIuMTcAX19saWJjX3N0YXJ0
+      X21haW5AR0xJQkNfMi4zNABwZXJyb3JAR0xJQkNfMi4xNwBfSVRNX2RlcmVnaXN0ZXJUTUNsb25l
+      VGFibGUAbWF0cml4X3JlbmRlcgBfX2Jzc19zdGFydF9fAHVubWFwbWVtAF9fY3hhX2ZpbmFsaXpl
+      QEdMSUJDXzIuMTcAc3ByaW50ZkBHTElCQ18yLjE3AG1hdHJpeF9ib3R0b20AZXhlY3V0ZV9jb2Rl
+      AGNsb2NrX2dldHRpbWVAR0xJQkNfMi4xNwBzdGRlcnJAR0xJQkNfMi4xNwBwY21fcGluX2ZzAGRv
+      dHNwb3MAbWVtX2ZyZWUAX2VkYXRhAHBvd0BHTElCQ18yLjI5AG9wdGFyZ0BHTElCQ18yLjE3AHdz
+      MjgxMV9yZW5kZXIAZ251X2Rldl9tYWtlZGV2QEdMSUJDXzIuMTcAd3MyODExX2NsZWFudXAAX19i
+      c3NfZW5kX18AcGNtX3Jhd19pbml0AGZjbG9zZUBHTElCQ18yLjE3AGF0b2lAR0xJQkNfMi4xNwBn
+      ZXRwaWRAR0xJQkNfMi4xNwBmb3BlbkBHTElCQ18yLjE3AG1lbV9sb2NrAG1hbGxvY0BHTElCQ18y
+      LjE3AHdpZHRoAHBjbV9waW5fY2xrAHBhcnNlYXJncwBtZW1zZXRAR0xJQkNfMi4xNwBkb3Rjb2xv
+      cnNfcmdidwBwd21fcGluX2NoYW4xAG1hdHJpeF9yYWlzZQBnZXRwYWdlc2l6ZUBHTElCQ18yLjE3
+      AF9fZGF0YV9zdGFydABwd21fcGluX3RhYmxlcwBfX3N0YWNrX2Noa19mYWlsQEdMSUJDXzIuMTcA
+      cnBpX2h3X2RldGVjdABzaWdhY3Rpb25AR0xJQkNfMi4xNwBwY21fcGluX2FsdAB3czI4MTFfc2V0
+      X2N1c3RvbV9nYW1tYV9mYWN0b3IAX19nbW9uX3N0YXJ0X18AX19zdGFja19jaGtfZ3VhcmRAR0xJ
+      QkNfMi4xNwBta25vZEBHTElCQ18yLjMzAGFib3J0QEdMSUJDXzIuMTcAX0lPX3N0ZGluX3VzZWQA
+      d3MyODExX3dhaXQAbWF0cml4AG1ib3hfY2xvc2UAcGNtX3Bpbl9kb3V0AGdldG9wdF9sb25nQEdM
+      SUJDXzIuMTcAZG90Y29sb3JzAG1tYXBAR0xJQkNfMi4xNwBleGVjdXRlX3FwdQBmcmVhZEBHTElC
+      Q18yLjE3AGNsZWFyX29uX2V4aXQAX2VuZABmcmVlQEdMSUJDXzIuMTcAcGNtX3Bpbl90YWJsZXMA
+      c3RybmNhc2VjbXBAR0xJQkNfMi4xNwBfX2VuZF9fAHBjbV9waW5fZGluAF9fYnNzX3N0YXJ0AG1i
+      b3hfb3BlbgBtYWluAHdzMjgxMV9pbml0AGZ3cml0ZUBHTElCQ18yLjE3AHdzMjgxMV9maW5pAG11
+      bm1hcEBHTElCQ18yLjE3AG1lbV9hbGxvYwBoZWlnaHQAdXNsZWVwQEdMSUJDXzIuMTcAd3MyODEx
+      X2dldF9yZXR1cm5fdF9zdHIAcXB1X2VuYWJsZQBwd21fcGluX2FsdABfSVRNX3JlZ2lzdGVyVE1D
+      bG9uZVRhYmxlAHB3bV9waW5fY2hhbjAAcHdtX3Jhd19pbml0AGRtYW51bV90b19vZmZzZXQAcHV0
+      Y2hhckBHTElCQ18yLjE3AGxlZHN0cmluZwB1bmxpbmtAR0xJQkNfMi4xNwBmcHJpbnRmQEdMSUJD
+      XzIuMTcAbWF0cml4X2NsZWFyAGlvY3RsQEdMSUJDXzIuMTcAAC5zeW10YWIALnN0cnRhYgAuc2hz
+      dHJ0YWIALmludGVycAAubm90ZS5nbnUuYnVpbGQtaWQALm5vdGUuQUJJLXRhZwAuZ251Lmhhc2gA
+      LmR5bnN5bQAuZHluc3RyAC5nbnUudmVyc2lvbgAuZ251LnZlcnNpb25fcgAucmVsYS5keW4ALnJl
+      bGEucGx0AC5pbml0AC50ZXh0AC5maW5pAC5yb2RhdGEALmVoX2ZyYW1lX2hkcgAuZWhfZnJhbWUA
+      LmluaXRfYXJyYXkALmZpbmlfYXJyYXkALmRhdGEucmVsLnJvAC5keW5hbWljAC5nb3QALmRhdGEA
+      LmJzcwAuY29tbWVudAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAGwAAAAEAAAACAAAAAAAAADgCAAAAAAAAOAIAAAAAAAAbAAAA
+      AAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAACMAAAAHAAAAAgAAAAAAAABUAgAAAAAAAFQCAAAA
+      AAAAJAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAA2AAAABwAAAAIAAAAAAAAAeAIAAAAA
+      AAB4AgAAAAAAACAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAARAAAAPb//28CAAAAAAAA
+      AJgCAAAAAAAAmAIAAAAAAADMAQAAAAAAAAUAAAAAAAAACAAAAAAAAAAAAAAAAAAAAE4AAAALAAAA
+      AgAAAAAAAABoBAAAAAAAAGgEAAAAAAAAeAkAAAAAAAAGAAAAAwAAAAgAAAAAAAAAGAAAAAAAAABW
+      AAAAAwAAAAIAAAAAAAAA4A0AAAAAAADgDQAAAAAAAEYEAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAA
+      AAAAAAAAXgAAAP///28CAAAAAAAAACYSAAAAAAAAJhIAAAAAAADKAAAAAAAAAAUAAAAAAAAAAgAA
+      AAAAAAACAAAAAAAAAGsAAAD+//9vAgAAAAAAAADwEgAAAAAAAPASAAAAAAAAgAAAAAAAAAAGAAAA
+      AwAAAAgAAAAAAAAAAAAAAAAAAAB6AAAABAAAAAIAAAAAAAAAcBMAAAAAAABwEwAAAAAAAMAJAAAA
+      AAAABQAAAAAAAAAIAAAAAAAAABgAAAAAAAAAhAAAAAQAAABCAAAAAAAAADAdAAAAAAAAMB0AAAAA
+      AABIAwAAAAAAAAUAAAAWAAAACAAAAAAAAAAYAAAAAAAAAI4AAAABAAAABgAAAAAAAAB4IAAAAAAA
+      AHggAAAAAAAAGAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAACJAAAAAQAAAAYAAAAAAAAA
+      kCAAAAAAAACQIAAAAAAAAFACAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAlAAAAAEAAAAG
+      AAAAAAAAAAAjAAAAAAAAACMAAAAAAAAMRQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAJoA
+      AAABAAAABgAAAAAAAAAMaAAAAAAAAAxoAAAAAAAAFAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAA
+      AAAAAACgAAAAAQAAAAIAAAAAAAAAIGgAAAAAAAAgaAAAAAAAAFgKAAAAAAAAAAAAAAAAAAAIAAAA
+      AAAAAAAAAAAAAAAAqAAAAAEAAAACAAAAAAAAAHhyAAAAAAAAeHIAAAAAAADEAQAAAAAAAAAAAAAA
+      AAAABAAAAAAAAAAAAAAAAAAAALYAAAABAAAAAgAAAAAAAABAdAAAAAAAAEB0AAAAAAAAZAYAAAAA
+      AAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAADAAAAADgAAAAMAAAAAAAAAqIUBAAAAAACohQAAAAAA
+      AAgAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAAzAAAAA8AAAADAAAAAAAAALCFAQAAAAAA
+      sIUAAAAAAAAIAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAANgAAAABAAAAAwAAAAAAAAC4
+      hQEAAAAAALiFAAAAAAAAwAYAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAADlAAAABgAAAAMA
+      AAAAAAAAeIwBAAAAAAB4jAAAAAAAABACAAAAAAAABgAAAAAAAAAIAAAAAAAAABAAAAAAAAAA7gAA
+      AAEAAAADAAAAAAAAAIiOAQAAAAAAiI4AAAAAAAB4AQAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAA
+      AAAAAPMAAAABAAAAAwAAAAAAAAAAkAEAAAAAAACQAAAAAAAASAUAAAAAAAAAAAAAAAAAAAgAAAAA
+      AAAAAAAAAAAAAAD5AAAACAAAAAMAAAAAAAAASJUBAAAAAABIlQAAAAAAACgAAAAAAAAAAAAAAAAA
+      AAAIAAAAAAAAAAAAAAAAAAAA/gAAAAEAAAAwAAAAAAAAAAAAAAAAAAAASJUAAAAAAAAtAAAAAAAA
+      AAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAEAAAACAAAAAAAAAAAAAAAAAAAAAAAAAHiVAAAAAAAA
+      qBUAAAAAAAAbAAAAhQAAAAgAAAAAAAAAGAAAAAAAAAAJAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAg
+      qwAAAAAAAEEIAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAEQAAAAMAAAAAAAAAAAAAAAAA
+      AAAAAAAAYbMAAAAAAAAHAQAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAA==
+    owner: root:staff
+    permissions: '0755'
+    path: /usr/local/bin/progresstracker.b64
+
+  - content: |
+      sh -c "$(wget https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh -O -)"
+      cat >> /home/akkapi/.zshrc <<EOF
+
+      source /usr/share/doc/fzf/examples/key-bindings.zsh
+      EOF
+      echo "Set oh-my-zsh theme to amuse in .zshrc"
+      echo "Change oh-my-zsh prompt in .oh-my-zsh/themes/amuse.zsh-theme to"
+      echo %{$fg_bold[green]%}%n@%m %{$fg_bold[blue]%}%~%{$reset_color%}$(git_prompt_info) ⌚ %{$fg_bold[red]%}%*%{$reset_color%}
+    owner: akkapi:akkapi
+    permissions: '0755'
+    path: /home/akkapi/oh-my-zsh-config
+
+# These commands will be ran once on first boot only
+runcmd:
+  - |
+    # Fix some permissions on vchiq device
+    echo 'SUBSYSTEM=="vchiq", GROUP="video", MODE="0660"' | sudo tee /etc/udev/rules.d/99-input.rules
+
+    # Pickup the hostname changes
+    systemctl restart dhcpcd
+    sleep 5
+    echo "Start progress tracker: $(date)"
+
+    # Build and start initial installation progress tracker: while the initial
+    # installation is running, a red LED walks across the LED strip.
+    cat /usr/local/bin/progresstracker.b64 | base64 -d > /usr/local/bin/progresstracker
+    chmod +x /usr/local/bin/progresstracker
+    rm /usr/local/bin/progresstracker.b64
+    /usr/local/bin/progresstracker -c &
+
+    # Add cluster hosts to /etc/hosts
+    cat /home/akkapi/cluster-hosts >> /etc/hosts
+    rm /home/akkapi/cluster-hosts
+    sleep 10
+    apt-get update
+
+    # Install a few extra packages - this could be done in the package section,
+    # but if we do it here, the installation progress tracker will start earlier.
+    echo "Starting package installation: $(date)"
+    apt-get install -y zsh tmux file jq dnsutils zip iftop net-tools libraspberrypi-bin fzf fonts-powerline
+
+    # Configure zsh
+    cp /etc/zsh/newuser.zshrc.recommended /home/akkapi/.zshrc
+    chown -R akkapi:akkapi /home/akkapi
+
+    # Install and start InfluxDB and telegraf
+    echo "Starting influxdb and telegraf installation: $(date)"
+    #curl -sL https://repos.influxdata.com/influxdb.key | apt-key add -
+    #echo "deb https://repos.influxdata.com/$(lsb_release -i -s | tr '[:upper:]' '[:lower:]') $(lsb_release -c -s) stable" | tee /etc/apt/sources.list.d/influxdb.list
+    wget -q https://repos.influxdata.com/influxdata-archive_compat.key
+    echo '393e8779c89ac8d958f81f942f9ad7fb82a25e133faddaf92e15b16e6ac9ce4c influxdata-archive_compat.key' | sha256sum -c && cat influxdata-archive_compat.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg > /dev/null
+    echo 'deb [signed-by=/etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg] https://repos.influxdata.com/debian stable main' | sudo tee /etc/apt/sources.list.d/influxdata.list
+    apt-get update
+    apt-get install -y influxdb telegraf
+    sudo systemctl unmask influxdb.service
+    service influxdb start
+
+    # Install and start EMQX
+    echo "Starting EMQX installation: $(date)"
+    curl -s https://assets.emqx.com/scripts/install-emqx-deb.sh | bash
+    apt-get install -y emqx
+    service emqx start
+
+    # Install and start Grafana
+    echo "Starting Grafana installation: $(date)"
+    wget -q -O - https://packages.grafana.com/gpg.key | apt-key add -
+    echo "deb https://packages.grafana.com/oss/deb stable main" | tee -a /etc/apt/sources.list.d/grafana.list
+    apt-get update
+    apt-get install -y grafana
+    /bin/systemctl daemon-reload
+    /bin/systemctl enable grafana-server
+    /bin/systemctl start grafana-server
+
+    # Set telegraph configuration
+    echo "Starting telegraf configuration: $(date)"
+    mv /home/akkapi/telegraf.conf /etc/telegraf/telegraf.conf
+    mv /home/akkapi/smappee-2.conf /etc/telegraf/telegraf.d
+    mv /home/akkapi/smappee.conf /etc/telegraf/telegraf.d
+    cp /etc/telegraf/raspberry-pi.conf /etc/telegraf/telegraf.conf
+
+    # Adapt some settings for telegraf and start telegraf
+    usermod -aG docker telegraf
+    usermod -aG video telegraf
+    /usr/sbin/setcap 'cap_net_admin,cap_net_raw+ep' $(which ping)
+    /bin/systemctl enable telegraf
+    /bin/systemctl start telegraf
+
+    # Install OpenJDK 11
+    echo "Starting Java installation: $(date)"
+    apt-get install -y openjdk-11-jdk
+
+    # configuring InfluxDB
+    echo "Configuring InfluxDB $(date)"
+    sudo -u akkapi influx <<ENDCFGINFLUX
+    create database {{ ds.meta_data.influx_db1 }};
+    create database {{ ds.meta_data.influx_db2 }};
+    create database {{ ds.meta_data.influx_db3 }};
+    create database {{ ds.meta_data.influx_db4 }};
+    create user {{ ds.meta_data.influx_user }} with password '{{ ds.meta_data.influx_passwd }}' with all privileges;
+    ENDCFGINFLUX
+    
+    # Install oh-my-zsh on akkapi account
+    wget https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh -O /tmp/install-oh-my-zsh
+    chmod +x /tmp/install-oh-my-zsh
+    sudo -u akkapi -g akkapi sh /tmp/install-oh-my-zsh
+    # Set the oh-my-zsh theme
+    sed -i 's/ZSH_THEME=.*/ZSH_THEME="amuse"/' /home/akkapi/.zshrc
+    # Enable fzf in zsh
+    echo "source /usr/share/doc/fzf/examples/key-bindings.zsh" >> /home/akkapi/.zshrc
+    # Change the zsh prompt to also print the hostname
+    sed -i 's/%~%{$reset_color%}$(git_prompt_info)/%n@%m %{$fg_bold[blue]%}%~%{$reset_color%}$(git_prompt_info)/' /home/akkapi/.oh-my-zsh/themes/amuse.zsh-theme
+
+
+    # Send SIGTERM to progress tracker - all LEDs switch to green
+    pkill progresstracker
+

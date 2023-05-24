@@ -1,5 +1,5 @@
-# Cloud-init specific
-meta-data
+# Project specific
+influxdb-backups/
 
 *.class
 *.log

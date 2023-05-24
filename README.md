@@ -13,9 +13,9 @@ a REST endpoint or via MQTT. The latter was chosen for this project.
 See the presentation (PDF) for details about the setup.
 
 Readers who want to duplicate this setup can do so (assuming they have a Smappee
-device of course) by provisioning a Raspberry Pi 4 (a 3 should work too in principle).
+device of course) by provisioning a Raspberry Pi 4 (a 3 should work too in principle but some tweaking of the provided configuration files may be required).
 
-This can be done by flashing both an SD and an SSD using the flash command.
+This can be done by flashing an SSD using the [flash](https://github.com/eloots/flash) command.
 
 Before doing that, copy the `cloud-init/meta-data.sample` file to `cloud-init/meta-data`
 and change it as needed (user & password in particular).
@@ -23,20 +23,17 @@ and change it as needed (user & password in particular).
 Download the flash command in the Release section in [this GitHub repository](https://github.com/eloots/flash).
 
 ```
-flash -n node-1 -j -m cloud-init/meta-data -u cloud-init/akka-pi-os-dhcp-64-ssd.yml \
-   https://cdimage.ubuntu.com/releases/20.04/release/ubuntu-20.04.5-preinstalled-server-arm64+raspi.img.xz
+flash -n home-iot -j -m cloud-init/meta-data -u cloud-init/smappee-2-ubuntu-22-04.yml \
+  https://cdimage.ubuntu.com/releases/22.04/release/ubuntu-22.04.2-preinstalled-server-arm64+raspi.img.xz
 ```
 
-> Note: Ubuntu Server 20.04 LTS 64-bit is what's needed. Check for the most recent version
-> of version 20.04 on this web page: https://cdimage.ubuntu.com/releases/20.04/release/
-> Select the Preinstalled server image (64-bit ARM)
 
-After flashing the SD and SSD, insert the SD card in the SD slot on the Raspberry Pi and
-connect the SSD drive to one of the USB-3 ports (blue connector). Connect the Raspberry Pi
-to your local home network via the physical Ethernet on the Pi.
+After flashing the SSD, connect the SSD drive to one of the USB-3 ports (blue connector)
+via an USB-3 to SATA adapter. Connect the Raspberry Pi to your local home network via the
+physical Ethernet on the Pi.
 
 > Note that this instead of using the onboard ethernet port, you can also utilise Wifi.
-> You'll need to configure Wifi as part of cloud-init.
+> You will also need to configure Wifi as part of cloud-init.
 
 Finally, power-up the Raspberry Pi by connecting it to a power supply. The Pi should
 appear on your local network after about a minute or two. Note that your LAN needs to
@@ -50,7 +47,8 @@ akkapi@node-1 $ sudo tail -f /var/log/cloud-init-*.log
 ```
 
 When cloud-init finishes the initial installation, all required software should be
-installed and configured!
+installed and configured! From start to finish (flash SSD till the system install is
+complete) takes about seven minutes.
 
 To finish things of, fire up a web browser and point it to your Pi's IP address and port 3000 (for example, if your Pi get IP address `192.168.68.200`, point your browser to 
 `192.168.68.200:3000`).
@@ -62,4 +60,10 @@ Once logged in, you should perform a small number of configuration steps:
 
 - Set the InfluxDB datasources at `192.168.68.200:3000/datasources/new`
 - Import the Raspberry Pi Grafana dashboard
-- Create dashboards for the aggregated energy stats
+- Import the Home Energy Monitoring dasboards
+
+Note that the provided Telegraf configurations and Grafana dashboards are specific
+to my home setup.
+
+I use the so-called Smappee monitoring system (a Smappee Solar and a Smappee Infinity).
+
